@@ -47,3 +47,62 @@ def write_json_atomic(path: Path, data: Any) -> None:
         except OSError:
             pass
         raise
+
+
+def load_settings() -> dict:
+    return read_json(settings_path(), {}) or {}
+
+
+def load_models_store() -> dict:
+    return read_json(models_store_path(), {}) or {}
+
+
+def load_custom() -> dict:
+    data = read_json(models_path(), {}) or {}
+    if "providers" not in data:
+        data["providers"] = {}
+    return data
+
+
+def load_auth() -> dict:
+    return read_json(auth_path(), {}) or {}
+
+
+def provider_model_map(store: dict, custom: dict) -> dict:
+    result: dict[str, list[dict]] = {}
+    for prov, info in store.items():
+        if not isinstance(info, dict):
+            continue
+        for m in info.get("models", []) or []:
+            if isinstance(m, dict):
+                result.setdefault(prov, []).append(
+                    {"id": m.get("id"), "name": m.get("name") or m.get("id"), "source": "builtin"})
+    for prov, cfg in custom.get("providers", {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        for m in cfg.get("models", []) or []:
+            if isinstance(m, dict):
+                result.setdefault(prov, []).append(
+                    {"id": m.get("id"), "name": m.get("name") or m.get("id"), "source": "custom"})
+    for prov in result:
+        result[prov].sort(key=lambda x: (x["source"], x["id"] or ""))
+    return result
+
+
+def resolve_has_key(provider: str, auth: dict, custom: dict) -> bool:
+    if provider in auth and auth[provider].get("key"):
+        return True
+    ak = custom.get("providers", {}).get(provider, {}).get("apiKey")
+    return isinstance(ak, str) and bool(ak.strip())
+
+
+def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id) -> bool:
+    if not provider or not model_id:
+        return False
+    for m in store.get(provider, {}).get("models", []) or []:
+        if m.get("id") == model_id:
+            return bool(m.get("reasoning"))
+    for m in custom.get("providers", {}).get(provider, {}).get("models", []) or []:
+        if m.get("id") == model_id:
+            return bool(m.get("reasoning"))
+    return False
