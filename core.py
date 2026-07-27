@@ -1,6 +1,6 @@
 # core.py — 纯逻辑，不 import tkinter
 from __future__ import annotations
-import json, os, shutil, tempfile
+import json, os, shutil, tempfile, uuid
 from pathlib import Path
 from typing import Any
 
@@ -153,3 +153,48 @@ def format_preset_row(preset: dict, settings: dict) -> str:
 
 def is_active(preset, settings):
     return preset.get("provider") == settings.get("defaultProvider") and preset.get("model") == settings.get("defaultModel")
+
+
+def new_preset_id() -> str:
+    return uuid.uuid4().hex
+
+
+def load_presets() -> list:
+    data = read_json(presets_path(), {}) or {}
+    presets = data.get("presets", [])
+    return presets if isinstance(presets, list) else []
+
+
+def save_presets(presets: list) -> None:
+    write_json_atomic(presets_path(), {"presets": presets})
+
+
+def add_preset(preset: dict) -> dict:
+    preset = dict(preset)
+    preset.setdefault("id", new_preset_id())
+    presets = load_presets()
+    presets.append(preset)
+    save_presets(presets)
+    return preset
+
+
+def update_preset(preset_id: str, changes: dict):
+    presets = load_presets()
+    updated = None
+    for p in presets:
+        if p.get("id") == preset_id:
+            p.update(changes)
+            updated = p
+            break
+    if updated is not None:
+        save_presets(presets)
+    return updated
+
+
+def delete_preset(preset_id: str) -> bool:
+    presets = load_presets()
+    kept = [p for p in presets if p.get("id") != preset_id]
+    if len(kept) == len(presets):
+        return False
+    save_presets(kept)
+    return True
