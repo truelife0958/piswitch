@@ -151,8 +151,73 @@ def format_preset_row(preset: dict, settings: dict) -> str:
     return f"{mark} {preset.get('name','?')}  [{preset.get('provider')}/{preset.get('model')}]  {preset.get('kind','')}"
 
 
+def light_backup(ts: str) -> Path:
+    dest = switch_backups_dir() / f"switch-{ts}"
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in (settings_path(), models_path(), auth_path()):
+        if p.exists():
+            shutil.copy2(p, dest / p.name)
+    return dest
+
+
+def apply_settings(provider: str, model: str, thinking=None) -> dict:
+    settings = load_settings()
+    settings["defaultProvider"] = provider
+    if model:
+        settings["defaultModel"] = model
+    if thinking:
+        settings["defaultThinkingLevel"] = thinking
+    write_json_atomic(settings_path(), settings)
+    return settings
+
+
+def merge_custom_provider(preset: dict) -> None:
+    custom = load_custom()
+    custom.setdefault("providers", {})[preset["provider"]] = build_custom_provider_cfg(preset)
+    write_json_atomic(models_path(), custom)
+
+
+def merge_auth_key(provider: str, api_key: str) -> None:
+    auth = load_auth()
+    auth[provider] = {"type": "apikey", "key": api_key}
+    write_json_atomic(auth_path(), auth)
+
+
+def switch_to(preset: dict, ts: str) -> dict:
+    light_backup(ts)
+    if preset.get("kind") == "custom":
+        merge_custom_provider(preset)
+        if preset.get("apiKey"):
+            merge_auth_key(preset["provider"], preset["apiKey"])
+    return apply_settings(preset.get("provider"), preset.get("model"), preset.get("thinking"))
+
+
 def is_active(preset, settings):
     return preset.get("provider") == settings.get("defaultProvider") and preset.get("model") == settings.get("defaultModel")
+
+
+def active_preset_id(presets: list, settings: dict):
+    for p in presets:
+        if is_active(p, settings):
+            return p.get("id")
+    return None
+
+
+def preset_from_current(settings: dict, custom: dict) -> dict:
+    prov = settings.get("defaultProvider")
+    model = settings.get("defaultModel")
+    cfg = custom.get("providers", {}).get(prov)
+    preset = {
+        "id": new_preset_id(),
+        "name": f"{prov}/{model}",
+        "kind": "custom" if cfg else "builtin",
+        "provider": prov, "model": model,
+        "thinking": settings.get("defaultThinkingLevel"),
+    }
+    if cfg:
+        preset.update({"baseUrl": cfg.get("baseUrl", ""), "api": cfg.get("api", "openai-completions"),
+                       "apiKey": cfg.get("apiKey", "")})
+    return preset
 
 
 def new_preset_id() -> str:
