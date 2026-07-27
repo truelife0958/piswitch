@@ -106,3 +106,50 @@ def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id)
         if m.get("id") == model_id:
             return bool(m.get("reasoning"))
     return False
+
+
+DEFAULT_INPUT_TYPES = ["text", "image"]
+
+
+def parse_model_ids(text: str) -> list[str]:
+    out: list[str] = []
+    for part in (text or "").split(","):
+        s = part.strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def build_custom_provider_cfg(preset: dict) -> dict:
+    ids = parse_model_ids(preset.get("model", "")) or ([preset["model"]] if preset.get("model") else [])
+    models = [{
+        "id": i, "name": i, "reasoning": bool(preset.get("reasoning", False)),
+        "input": list(DEFAULT_INPUT_TYPES),
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 128000, "maxTokens": 16384,
+    } for i in ids]
+    return {
+        "name": preset.get("name") or preset["provider"],
+        "baseUrl": preset.get("baseUrl", ""),
+        "api": preset.get("api", "openai-completions"),
+        "apiKey": preset.get("apiKey", ""),
+        "models": models,
+    }
+
+
+def fetch_models_url(base: str) -> str:
+    b = (base or "").rstrip("/")
+    if b.endswith("/models"):
+        return b
+    if b.endswith("/v1"):
+        return b + "/models"
+    return b + "/v1/models"
+
+
+def format_preset_row(preset: dict, settings: dict) -> str:
+    mark = "*" if is_active(preset, settings) else " "
+    return f"{mark} {preset.get('name','?')}  [{preset.get('provider')}/{preset.get('model')}]  {preset.get('kind','')}"
+
+
+def is_active(preset, settings):
+    return preset.get("provider") == settings.get("defaultProvider") and preset.get("model") == settings.get("defaultModel")
