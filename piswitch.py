@@ -281,9 +281,12 @@ class App(tk.Tk):
             self.api_key_var.set(config.get("apiKey", ""))
             self.api_key_entry.configure(state="normal")
 
-        # Logout / delete-credentials is enabled iff there is an auth.json entry to remove
-        has_auth_entry = isinstance(auth_entry, dict) and bool(auth_entry)
-        self.logout_provider_button.configure(state="normal" if has_auth_entry else "disabled")
+
+        # Logout / delete-credentials only makes sense for OAuth/session-login providers;
+        # for api_key providers the user just edits the API-key field directly (no session to end).
+        is_oauth = kind == "oauth"
+        has_oauth_entry = is_oauth and isinstance(auth_entry, dict) and bool(auth_entry)
+        self.logout_provider_button.configure(state="normal" if has_oauth_entry else "disabled")
 
         self.current_provider = provider
         self.provider_entry.configure(state="normal")
@@ -299,8 +302,8 @@ class App(tk.Tk):
             self.name_var.set(config.get("name") or provider + " (内置)")
             self.base_url_var.set(config.get("baseUrl") or "(内置)")
             self.api_key_entry.configure(state="disabled")
-            # logout must remain enabled if there is an auth entry;
-            if has_auth_entry:
+            # logout must remain enabled if this is an OAuth provider with an entry;
+            if has_oauth_entry:
                 self.logout_provider_button.configure(state="normal")
         else:
             self._set_editing_state(True)
@@ -333,7 +336,7 @@ class App(tk.Tk):
         self.api_var.set(API_TYPES[0])
         self.api_key_var.set("")
         self.model_tree.delete(*self.model_tree.get_children())
-        self._set_editing_state(False)
+        self._set_editing_state(True)  # new-provider mode: enable save/test so user can create
         self.provider_entry.focus_set()
         self.status_var.set("填写供应商信息后保存")
 
