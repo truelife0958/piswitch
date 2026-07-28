@@ -342,6 +342,9 @@ class App(tk.Tk):
 
     def save_provider(self) -> None:
         provider = self.provider_var.get().strip()
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showerror("保存失败", f"{provider} 是内置供应商，不能覆盖或保存。")
+            return
         if not self.current_provider and provider in core.load_custom()["providers"]:
             messagebox.showerror("保存失败", f"Provider ID {provider} 已存在，请从左侧选择后编辑")
             return
@@ -561,6 +564,9 @@ class App(tk.Tk):
         provider = self.current_provider
         if not provider:
             return
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除；可用退出登录移除其凭据。")
+            return
         prompt = f"删除 {provider} 及其模型和 API key？"
         if core.is_default_provider(provider):
             prompt = (
@@ -613,6 +619,9 @@ class App(tk.Tk):
         if not provider:
             messagebox.showinfo("增加模型", "请先保存供应商")
             return
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showinfo("增加模型", f"{provider} 是内置供应商，不可修改")
+            return
         model_ids = simpledialog.askstring("增加模型", "Model ID（多个用逗号分隔）：", parent=self)
         if model_ids is None:
             return
@@ -629,6 +638,9 @@ class App(tk.Tk):
         selection = self.model_tree.selection()
         if not provider or not selection:
             messagebox.showinfo("删除模型", "请先选中一个模型")
+            return
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showinfo("删除模型", f"{provider} 是内置供应商，不可修改")
             return
         model_ids = [self.model_tree.item(iid, "values")[0] for iid in selection]
         count = len(model_ids)
@@ -663,6 +675,9 @@ class App(tk.Tk):
         provider = self.current_provider
         if not provider:
             messagebox.showinfo("清空模型", "请先选中一个供应商")
+            return
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showinfo("清空模型", f"{provider} 是内置供应商，不可清空")
             return
         current = core.load_custom().get("providers", {}).get(provider, {}).get("models", [])
         n = len(current) if isinstance(current, list) else 0
