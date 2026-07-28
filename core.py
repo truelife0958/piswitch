@@ -214,6 +214,29 @@ def backfill_proxy_compat(data: Any) -> bool:
             changed = True
     return changed
 
+
+def range_toggle_targets(iids, anchor_iid, click_iid, is_selected):
+    """Compute the (iid, target_checked) plan for a Shift+click marquee toggle.
+
+    Given the ordered list of row iids, an anchor row, the clicked row, and a
+    function `is_selected(iid) -> bool` returning the current checked state,
+    returns a list of ``(iid, target)`` pairs to apply. The whole span from the
+    anchor to the clicked row is unified to the state the clicked row takes
+    after this click (toggled). If anchor == clicked row, only that row toggles.
+
+    Returns [] if anchor or click is not in `iids`.
+    """
+    if anchor_iid not in iids or click_iid not in iids:
+        return []
+    start = iids.index(anchor_iid)
+    end = iids.index(click_iid)
+    if start > end:
+        start, end = end, start
+    target = not is_selected(click_iid)  # state the clicked row takes after this click
+    return [(iid, target) for iid in iids[start:end + 1]]
+
+
+
 def parse_model_ids(text: str) -> list[str]:
     out: list[str] = []
     for part in (text or "").split(","):

@@ -110,6 +110,48 @@ def test_backfill_proxy_compat_tolerates_bad_input():
     assert core.backfill_proxy_compat({"providers": {"p": "oops"}}) is False
 
 
+def test_range_toggle_targets_forward_span_unifies_to_target():
+    """Shift+click forward: rows 2..5 get unified to whatever the click toggles."""
+    iids = list("0123456789")
+    selected = {"2", "4"}  # row 4 already checked
+    is_selected = lambda i: i in selected
+    # Click row 5 (currently unchecked) → toggles to checked; range [2..5] unified to True.
+    plan = core.range_toggle_targets(iids, "2", "5", is_selected)
+    assert plan == [("2", True), ("3", True), ("4", True), ("5", True)]
+
+
+def test_range_toggle_targets_backward_span_works():
+    """Shift+click earlier row: the span is reversed but still toggles uniformly."""
+    iids = list("0123456789")
+    selected = set()  # anchor row 7 checked, click row 2 unchecked → unify to True
+    is_selected = lambda i: i == "7"
+    plan = core.range_toggle_targets(iids, "7", "2", is_selected)
+    assert plan == [(iid, True) for iid in ("2", "3", "4", "5", "6", "7")]
+
+
+def test_range_toggle_targets_click_clears_the_span():
+    """If anchor row is checked and click row is checked, the click unchecks it;
+    spanning rows get unified to unchecked."""
+    iids = list("0123456789")
+    selected = {"1", "2", "3"}
+    plan = core.range_toggle_targets(iids, "1", "3", lambda i: i in selected)
+    assert plan == [("1", False), ("2", False), ("3", False)]
+
+
+def test_range_toggle_targets_anchor_equals_click_degenerate():
+    """A span of one row is just that row's toggle."""
+    iids = list("abcde")
+    plan = core.range_toggle_targets(iids, "b", "b", lambda i: False)
+    assert plan == [("b", True)]
+
+
+def test_range_toggle_targets_unknown_iids_returns_empty():
+    iids = list("abcde")
+    assert core.range_toggle_targets(iids, "zzz", "a", lambda i: False) == []
+    assert core.range_toggle_targets(iids, "a", "zzz", lambda i: False) == []
+    assert core.range_toggle_targets([], "a", "b", lambda i: False) == []
+
+
 def test_fetch_models_url_normalization():
     assert core.fetch_models_url("https://gw") == "https://gw/v1/models"
     assert core.fetch_models_url("https://gw/") == "https://gw/v1/models"

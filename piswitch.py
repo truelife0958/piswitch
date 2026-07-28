@@ -379,6 +379,7 @@ class App(tk.Tk):
         selected: set[str] = set()
         selection_text = tk.StringVar(value=f"发现 {len(models)} 个模型，已选择 0 个")
         ttk.Label(win, textvariable=selection_text, padding=(10, 10, 10, 6)).pack(anchor="w")
+        ttk.Label(win, text="提示：单击或空格切换单行勾选；Shift+单击框选一片。", padding=(10, 0, 10, 4)).pack(anchor="w")
         area = ttk.Frame(win, padding=(10, 0, 10, 8))
         area.pack(fill="both", expand=True)
         tree = ttk.Treeview(
@@ -412,6 +413,8 @@ class App(tk.Tk):
             else:
                 selected.discard(item)
 
+        last_clicked = {"iid": None}  # anchor for shift-click range toggle
+
         def toggle_item(item: str) -> None:
             set_checked(item, item not in selected)
             tree.focus_set()
@@ -421,10 +424,25 @@ class App(tk.Tk):
 
         def on_tree_click(event) -> str | None:
             item = tree.identify_row(event.y)
-            if item and tree.identify_region(event.x, event.y) in {"cell", "tree"}:
-                toggle_item(item)
+            if not item or tree.identify_region(event.x, event.y) not in {"cell", "tree"}:
+                return None
+            # Shift+click = marquee toggle over the range from the anchor to this row,
+            # unifying the whole span to whatever state this click produces.
+            if event.state & 0x0001 and last_clicked["iid"] is not None:
+                iids = tree.get_children()
+                for row_iid, target in core.range_toggle_targets(
+                    iids, last_clicked["iid"], item, lambda i: i in selected
+                ):
+                    set_checked(row_iid, target)
+                last_clicked["iid"] = item
+                tree.focus_set()
+                tree.focus(item)
+                tree.selection_set(item)
+                update_selection_text()
                 return "break"
-            return None
+            toggle_item(item)
+            last_clicked["iid"] = item
+            return "break"
 
         def on_tree_space(_event) -> str:
             item = tree.focus()
