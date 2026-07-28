@@ -51,6 +51,65 @@ def test_merge_openai_proxy_compat_preserves_all_explicit_settings():
     }
 
 
+def test_backfill_proxy_compat_adds_defaults_to_legacy_openai_providers():
+    # A provider saved before the safe-default code shipped: no compat block at all.
+    data = {"providers": {"elysiver": {
+        "name": "elysiver", "api": "openai-completions", "baseUrl": "https://gw/v1",
+    }}}
+    assert core.backfill_proxy_compat(data) is True
+    assert data["providers"]["elysiver"]["compat"] == {
+        "sendSessionAffinityHeaders": True,
+        "supportsLongCacheRetention": False,
+    }
+
+
+def test_backfill_proxy_compat_partially_filled_block():
+    # e.g. ark: sendSessionAffinityHeaders present but long-cache default missing.
+    data = {"providers": {"ark": {
+        "name": "ark", "api": "openai-completions",
+        "compat": {"sendSessionAffinityHeaders": True},
+    }}, "other": {"x": 1}}
+    assert core.backfill_proxy_compat(data) is True
+    assert data["providers"]["ark"]["compat"] == {
+        "sendSessionAffinityHeaders": True,
+        "supportsLongCacheRetention": False,
+    }
+    assert data["other"] == {"x": 1}  # untouched global structure
+
+
+def test_backfill_proxy_compat_preserves_explicit_overrides():
+    # A user who opted OUT of affinity headers should not be re-enabled.
+    data = {"providers": {"p": {
+        "api": "openai-completions",
+        "compat": {
+            "sendSessionAffinityHeaders": False,
+            "supportsLongCacheRetention": True,
+            "supportsUsageInStreaming": False,
+        },
+    }}, "providers_store": {"nvidia": {}}}
+    assert core.backfill_proxy_compat(data) is False
+    assert data["providers"]["p"]["compat"] == {
+        "sendSessionAffinityHeaders": False,
+        "supportsLongCacheRetention": True,
+        "supportsUsageInStreaming": False,
+    }
+
+
+def test_backfill_proxy_compat_skips_non_openai_providers():
+    data = {"providers": {"anth": {
+        "api": "anthropic-messages", "compat": {"supportsLongCacheRetention": True},
+    }}, "providers_store": {"the same": {}}}
+    assert core.backfill_proxy_compat(data) is False
+    assert data["providers"]["anth"]["compat"] == {"supportsLongCacheRetention": True}
+
+
+def test_backfill_proxy_compat_tolerates_bad_input():
+    assert core.backfill_proxy_compat(None) is False
+    assert core.backfill_proxy_compat("not a dict") is False
+    assert core.backfill_proxy_compat({"providers": "oops"}) is False
+    assert core.backfill_proxy_compat({"providers": {"p": "oops"}}) is False
+
+
 def test_fetch_models_url_normalization():
     assert core.fetch_models_url("https://gw") == "https://gw/v1/models"
     assert core.fetch_models_url("https://gw/") == "https://gw/v1/models"

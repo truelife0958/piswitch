@@ -111,6 +111,7 @@ def load_custom() -> dict:
     data = _dict_or_empty(read_json(models_path(), {}))
     if not isinstance(data.get("providers"), dict):
         data["providers"] = {}
+    backfill_proxy_compat(data)  # self-heal legacy openai-completions providers
     return data
 
 
@@ -188,6 +189,30 @@ def merge_openai_proxy_compat(compat: Any) -> dict:
         **(compat if isinstance(compat, dict) else {}),
     }
 
+
+def backfill_proxy_compat(data: Any) -> bool:
+    """Field-level backfill of OPENAI_PROXY_COMPAT onto existing openai-completions
+    providers that predate the safe-default code. Explicit user settings are preserved;
+    only missing keys are filled in. Returns True if anything changed.
+
+    Mutates `data` in place. Safe to call repeatedly (idempotent).
+    """
+    if not isinstance(data, dict):
+        return False
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        return False
+    changed = False
+    for prov in providers.values():
+        if not isinstance(prov, dict) or prov.get("api") != "openai-completions":
+            continue
+        compat = prov.get("compat")
+        compat = compat if isinstance(compat, dict) else {}
+        merged = {**OPENAI_PROXY_COMPAT, **compat}
+        if merged != prov.get("compat"):
+            prov["compat"] = merged
+            changed = True
+    return changed
 
 def parse_model_ids(text: str) -> list[str]:
     out: list[str] = []

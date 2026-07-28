@@ -59,3 +59,29 @@ def test_write_json_bundle_rolls_back_prior_files(monkeypatch, pi_env):
     assert core.read_json(second, {}) == original_second
 
 
+def test_load_custom_self_heals_legacy_openai_compat(pi_env):
+    # Regression: a provider saved before the safe-default code shipped had no
+    # compat block, so pi sent prompt_cache_key upstream and got HTTP 400.
+    legacy = {"providers": {"elysiver": {
+        "name": "elysiver", "api": "openai-completions",
+        "baseUrl": "https://elysiver.example/v1",
+        "apiKey": "sk-legacy",
+        "models": [{"id": "glm-5.2", "name": "glm-5.2"}],
+    }, "ark": {
+        "name": "ark", "api": "openai-completions",
+        "compat": {"sendSessionAffinityHeaders": True},  # missing long-cache key
+    }}}
+    (pi_env["agent"] / "models.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = core.load_custom()
+    assert loaded["providers"]["elysiver"]["compat"] == {
+        "sendSessionAffinityHeaders": True,
+        "supportsLongCacheRetention": False,
+    }
+    assert loaded["providers"]["ark"]["compat"] == {
+        "sendSessionAffinityHeaders": True,
+        "supportsLongCacheRetention": False,
+    }
+
+    # The backfill is idempotent across reads.
+    core.load_custom()
