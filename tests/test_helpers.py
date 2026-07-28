@@ -203,3 +203,31 @@ def test_auth_login_state_tracks_expiry():
     assert core.auth_login_state("p", {"p": {"access": ""}}) == "none"
     assert core.auth_login_state("p", {}) == "none"
     assert core.auth_login_state("ghost", {"x": {}}) == "none"
+
+
+def test_hidden_builtins_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setenv("PISWITCH_DATA_DIR", str(tmp_path))
+    assert core.load_hidden_builtins() == set()
+    core.hide_builtin("nvidia"); core.hide_builtin("deepseek")
+    assert core.load_hidden_builtins() == {"nvidia", "deepseek"}
+    core.hide_builtin("nvidia")  # idempotent
+    assert core.load_hidden_builtins() == {"nvidia", "deepseek"}
+    core.unhide_builtin("nvidia")
+    assert core.load_hidden_builtins() == {"deepseek"}
+    core.unhide_builtin("never-was")  # unhide absent is no-op
+    assert core.load_hidden_builtins() == {"deepseek"}
+
+
+def test_hidden_builtins_recovers_from_corrupt_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("PISWITCH_DATA_DIR", str(tmp_path))
+    tmp_path.joinpath("hidden_builtins.json").write_text("not json{", encoding="utf-8")
+    assert core.load_hidden_builtins() == set()
+    core.hide_builtin("x")  # write succeeds and recovers
+    assert core.load_hidden_builtins() == {"x"}
+
+
+def test_hidden_builtins_accepts_legacy_dict_shape(monkeypatch, tmp_path):
+    monkeypatch.setenv("PISWITCH_DATA_DIR", str(tmp_path))
+    tmp_path.joinpath("hidden_builtins.json").write_text(
+        '{"providers": ["a", "b"]}', encoding="utf-8")
+    assert core.load_hidden_builtins() == {"a", "b"}

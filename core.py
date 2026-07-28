@@ -50,6 +50,12 @@ def presets_path() -> Path:
     return data_dir() / "presets.json"
 
 
+def hidden_builtins_path() -> Path:
+    """Piswitch-local list of builtin providers the user hid from the provider list."""
+    return data_dir() / "hidden_builtins.json"
+
+
+
 def switch_backups_dir() -> Path:
     return data_dir() / "backups"
 
@@ -135,6 +141,46 @@ def is_builtin_provider(provider: str, store: dict) -> bool:
     """True if this provider is shipped in models-store.json (pi-builtin)."""
     info = store.get(provider) if isinstance(store, dict) else None
     return isinstance(info, dict) and isinstance(info.get("models"), list)
+
+
+def load_hidden_builtins() -> set[str]:
+    """Builtin provider ids the user removed from the piswitch list."""
+    try:
+        data = json.loads(hidden_builtins_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if isinstance(data, list):
+        return {str(x) for x in data if isinstance(x, str) and x}
+    if isinstance(data, dict):
+        ids = data.get("providers")
+        if isinstance(ids, list):
+            return {str(x) for x in ids if isinstance(x, str) and x}
+    return set()
+
+
+def _write_hidden_builtins(ids: set[str]) -> None:
+    ids = {x for x in ids if isinstance(x, str) and x}
+    data_dir().mkdir(parents=True, exist_ok=True)
+    hidden_builtins_path().write_text(
+        json.dumps(sorted(ids), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def hide_builtin(provider: str) -> None:
+    if not isinstance(provider, str) or not provider:
+        return
+    ids = load_hidden_builtins()
+    ids.add(provider)
+    _write_hidden_builtins(ids)
+
+
+def unhide_builtin(provider: str) -> None:
+    if not isinstance(provider, str) or not provider:
+        return
+    ids = load_hidden_builtins()
+    ids.discard(provider)
+    _write_hidden_builtins(ids)
+
 def provider_model_map(store: dict, custom: dict) -> dict:
     result: dict[str, list[dict]] = {}
     for prov, info in store.items():

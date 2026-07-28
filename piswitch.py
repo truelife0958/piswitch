@@ -60,6 +60,7 @@ class App(tk.Tk):
         self.api_key_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="就绪")
+        self.show_hidden = tk.BooleanVar(value=False)  # show builtin providers the user hid
         self._network_results: queue.Queue = queue.Queue()
         self._network_busy = False
 
@@ -74,6 +75,7 @@ class App(tk.Tk):
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
         ttk.Button(toolbar, text="新增", command=self.new_provider).pack(side="right", padx=(6, 0))
+        ttk.Checkbutton(toolbar, text="显示隐藏", variable=self.show_hidden, command=self.refresh_providers).pack(side="right", padx=(6, 0))
         ttk.Button(toolbar, text="刷新", command=self.refresh_providers).pack(side="right")
         ttk.Button(toolbar, text="恢复备份", command=self.open_backup_restore).pack(side="right", padx=6)
 
@@ -146,6 +148,8 @@ class App(tk.Tk):
         self.delete_provider_button.pack(side="left", padx=8)
         self.logout_provider_button = ttk.Button(actions, text="退出登录", command=self.logout_provider)
         self.logout_provider_button.pack(side="left", padx=8)
+        self.hide_builtin_button = ttk.Button(actions, text="从列表移除", command=self.toggle_hide_builtin)
+        self.hide_builtin_button.pack(side="left", padx=8)
 
         model_header = ttk.Frame(right)
         model_header.pack(fill="x", pady=(2, 6))
@@ -194,7 +198,8 @@ class App(tk.Tk):
         self.delete_model_button.configure(state=state)
         self.clear_models_button.configure(state=state)
         self.fetch_model_button.configure(state=state)
-
+        # hide-from-list only applies to builtin; _load_provider re-enables it when a builtin is selected
+        self.hide_builtin_button.configure(state="disabled")
     def refresh_providers(self, select: str | None = None) -> None:
         custom = core.load_custom()
         auth = core.load_auth()
@@ -229,8 +234,11 @@ class App(tk.Tk):
             _insert(provider, config, model_count)
 
         # Then builtin providers not overridden by a custom entry of the same id.
+        hidden = core.load_hidden_builtins() if not getattr(self, "show_hidden", None) or not self.show_hidden.get() else set()
         for provider, info in sorted(store.items()):
             if provider in custom_providers or not isinstance(info, dict):
+                continue
+            if provider in hidden:
                 continue
             models = info.get("models", [])
             model_count = len(models) if isinstance(models, list) else 0
@@ -287,7 +295,15 @@ class App(tk.Tk):
         is_oauth = kind == "oauth"
         has_oauth_entry = is_oauth and isinstance(auth_entry, dict) and bool(auth_entry)
         self.logout_provider_button.configure(state="normal" if has_oauth_entry else "disabled")
-
+        hidden = core.load_hidden_builtins()
+        if builtin:
+            # toggle button text reflects current hide state
+            if provider in hidden:
+                self.hide_builtin_button.configure(text="恢复显示", state="normal")
+            else:
+                self.hide_builtin_button.configure(text="从列表移除", state="normal")
+        else:
+            self.hide_builtin_button.configure(text="从列表移除", state="disabled")
         self.current_provider = provider
         self.provider_entry.configure(state="normal")
         self.provider_var.set(provider)
@@ -305,6 +321,11 @@ class App(tk.Tk):
             # logout must remain enabled if this is an OAuth provider with an entry;
             if has_oauth_entry:
                 self.logout_provider_button.configure(state="normal")
+            # hide-from-list toggle is enabled for builtins; text/state reflects current hide status
+            if provider in core.load_hidden_builtins():
+                self.hide_builtin_button.configure(text="恢复显示", state="normal")
+            else:
+                self.hide_builtin_button.configure(text="从列表移除", state="normal")
         else:
             self._set_editing_state(True)
         self._refresh_models(config)
@@ -565,7 +586,7 @@ class App(tk.Tk):
         if not provider:
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除；可用退出登录移除其凭据。")
+            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除。\n可用左侧“从列表移除”把它从本列表中隐藏，或用“退出登录”移除其凭据。")
             return
         prompt = f"删除 {provider} 及其模型和 API key？"
         if core.is_default_provider(provider):
@@ -614,6 +635,25 @@ class App(tk.Tk):
         self.refresh_providers(select=provider)
         self.status_var.set(f"已退出登录 {provider}")
 
+
+    def toggle_hide_builtin(self) -> None:
+        """Hide or unhide a builtin provider from the piswitch list (models-store is left untouched)."""
+        provider = self.current_provider
+        if not provider:
+            return
+        store = core.load_models_store()
+        if not core.is_builtin_provider(provider, store):
+            messagebox.showinfo("不适用", f"{provider} 不是内置供应商。")
+            return
+        hidden = core.load_hidden_builtins()
+        if provider in hidden:
+            core.unhide_builtin(provider)
+            self.refresh_providers(select=provider)
+            self.status_var.set(f"已恢复显示 {provider}")
+        else:
+            core.hide_builtin(provider)
+            self.refresh_providers()
+            self.status_var.set(f"已从列表移除 {provider}（勾选顶部“显示隐藏”可重新显示）")
     def add_models(self) -> None:
         provider = self.current_provider
         if not provider:
