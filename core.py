@@ -131,6 +131,10 @@ def _dict_or_empty(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def is_builtin_provider(provider: str, store: dict) -> bool:
+    """True if this provider is shipped in models-store.json (pi-builtin)."""
+    info = store.get(provider) if isinstance(store, dict) else None
+    return isinstance(info, dict) and isinstance(info.get("models"), list)
 def provider_model_map(store: dict, custom: dict) -> dict:
     result: dict[str, list[dict]] = {}
     for prov, info in store.items():

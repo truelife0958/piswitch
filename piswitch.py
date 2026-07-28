@@ -187,6 +187,8 @@ class App(tk.Tk):
     def _set_editing_state(self, editing: bool) -> None:
         self.provider_entry.configure(state="normal")
         state = "normal" if editing else "disabled"
+        self.save_provider_button.configure(state=state)
+        self.test_connection_button.configure(state=state)
         self.delete_provider_button.configure(state=state)
         self.add_model_button.configure(state=state)
         self.delete_model_button.configure(state=state)
@@ -196,15 +198,13 @@ class App(tk.Tk):
     def refresh_providers(self, select: str | None = None) -> None:
         custom = core.load_custom()
         auth = core.load_auth()
-        providers = custom["providers"]
+        store = core.load_models_store()
+        custom_providers = custom["providers"]
         self.provider_tree.delete(*self.provider_tree.get_children())
 
-        for provider, config in sorted(providers.items()):
-            if not isinstance(config, dict):
-                continue
-            models = config.get("models", [])
-            model_count = len(models) if isinstance(models, list) else 0
+        def _insert(provider: str, config: dict, model_count: int) -> None:
             kind = core.auth_kind(provider, auth, custom)
+            builtin = core.is_builtin_provider(provider, store)
             if kind == "oauth":
                 state = core.auth_login_state(provider, auth)
                 auth_label = "已登录" if state == "logged_in" else ("已过期" if state == "expired" else "OAuth")
@@ -212,13 +212,29 @@ class App(tk.Tk):
                 auth_label = "API Key"
             else:
                 auth_label = "无"
+            if builtin:
+                auth_label = f"内置·{auth_label}" if auth_label != "无" else "内置"
             self.provider_tree.insert(
                 "",
                 "end",
                 iid=provider,
-                values=(provider, config.get("name", provider), model_count, auth_label),
+                values=(provider, config.get("name") or provider, model_count, auth_label),
             )
 
+        for provider, config in sorted(custom_providers.items()):
+            if not isinstance(config, dict):
+                continue
+            models = config.get("models", [])
+            model_count = len(models) if isinstance(models, list) else 0
+            _insert(provider, config, model_count)
+
+        # Then builtin providers not overridden by a custom entry of the same id.
+        for provider, info in sorted(store.items()):
+            if provider in custom_providers or not isinstance(info, dict):
+                continue
+            models = info.get("models", [])
+            model_count = len(models) if isinstance(models, list) else 0
+            _insert(provider, info, model_count)
         target = select or self.current_provider
         if target and self.provider_tree.exists(target):
             self.provider_tree.selection_set(target)
@@ -231,7 +247,7 @@ class App(tk.Tk):
             first = self.provider_tree.get_children()[0]
             self.provider_tree.selection_set(first)
             self._load_provider(first)
-        self.status_var.set(f"已加载 {len(providers)} 个自定义供应商")
+        self.status_var.set(f"已加载 {len(custom_providers)} 个自定义供应商")
 
     def _on_provider_selected(self, _event=None) -> None:
         selection = self.provider_tree.selection()
@@ -241,9 +257,14 @@ class App(tk.Tk):
     def _load_provider(self, provider: str) -> None:
         custom = core.load_custom()
         auth = core.load_auth()
+        store = core.load_models_store()
         config = custom["providers"].get(provider)
+        builtin = core.is_builtin_provider(provider, store)
         if not isinstance(config, dict):
-            return
+            # not custom — fall back to the builtin store entry (read-only)
+            if not builtin:
+                return
+            config = store.get(provider, {})
         auth_entry = auth.get(provider) if isinstance(auth, dict) else None
         kind = core.auth_kind(provider, auth, custom)
         if kind == "api_key":
@@ -267,11 +288,24 @@ class App(tk.Tk):
         self.current_provider = provider
         self.provider_entry.configure(state="normal")
         self.provider_var.set(provider)
-        self.name_var.set(config.get("name", provider))
+        self.name_var.set(config.get("name") or provider)
         self.base_url_var.set(config.get("baseUrl", ""))
         self.api_var.set(config.get("api", API_TYPES[0]))
-        self._set_editing_state(True)
+        # Builtin providers are read-only: lock form fields, show store models, disable CRUD.
+        if builtin:
+            # editing-state first disables all action buttons; then we also lock form entry fields
+            self._set_editing_state(False)
+            self.provider_entry.configure(state="disabled")
+            self.name_var.set(config.get("name") or provider + " (内置)")
+            self.base_url_var.set(config.get("baseUrl") or "(内置)")
+            self.api_key_entry.configure(state="disabled")
+            # logout must remain enabled if there is an auth entry;
+            if has_auth_entry:
+                self.logout_provider_button.configure(state="normal")
+        else:
+            self._set_editing_state(True)
         self._refresh_models(config)
+
     def _refresh_models(self, config: dict) -> None:
         self.model_tree.delete(*self.model_tree.get_children())
         models = config.get("models", [])

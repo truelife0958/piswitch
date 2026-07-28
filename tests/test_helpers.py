@@ -168,6 +168,15 @@ def test_format_preset_row_marks_active():
     assert "newapi/gpt-4o" in core.format_preset_row(active, settings)
 
 
+def test_is_builtin_provider_distinguishes_store():
+    store = {"deepseek": {"models": [{"id": "a"}]}, "nvidia": {"models": []}}
+    assert core.is_builtin_provider("deepseek", store) is True
+    assert core.is_builtin_provider("nvidia", store) is True  # empty models list still counts
+    assert core.is_builtin_provider("ark", store) is False  # custom-only
+    assert core.is_builtin_provider("ghost", store) is False
+    assert core.is_builtin_provider("x", {}) is False
+
+
 def test_auth_kind_classifies_api_key_vs_oauth():
     apikey_auth = {"newapi": {"type": "api_key", "key": "sk-abc"}}
     oauth_auth = {"corp-x": {"access": "tok", "refresh": "r", "expires": 99999999999999}}
