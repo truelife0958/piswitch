@@ -32,3 +32,11 @@ def test_model_supports_reasoning():
     assert core.model_supports_reasoning(store, custom, "nvidia", "z-ai/glm-5.2") is True
     assert core.model_supports_reasoning(store, custom, "nvidia", "z-ai/glm-4") is False
     assert core.model_supports_reasoning(store, custom, "nvidia", None) is False
+
+
+def test_catalog_helpers_ignore_malformed_entries():
+    store = {"bad": {"models": [None, {}, {"id": "ok"}]}}
+    custom = {"providers": {"bad": None}}
+    assert core.provider_model_map(store, custom)["bad"][0]["id"] == "ok"
+    assert core.resolve_has_key("bad", {"bad": "invalid"}, custom) is False
+    assert core.model_supports_reasoning(store, custom, "bad", "missing") is False

@@ -25,7 +25,7 @@ SAMPLE_CUSTOM = {"providers": {"newapi": {
     "name": "NewAPI", "baseUrl": "https://gw/v1", "api": "openai-completions",
     "apiKey": "$NEWAPI_API_KEY", "models": [{"id": "gpt-4o", "name": "gpt-4o"}],
 }}}
-SAMPLE_AUTH = {"deepseek": {"type": "apikey", "key": "sk-abc"}}
+SAMPLE_AUTH = {"deepseek": {"type": "api_key", "key": "sk-abc"}}
 
 
 @pytest.fixture(autouse=True)

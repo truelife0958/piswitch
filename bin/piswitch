@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PYSTRAY_BACKEND="${PYSTRAY_BACKEND:-xorg}"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+exec python3 "$SCRIPT_DIR/piswitch.py" "$@"

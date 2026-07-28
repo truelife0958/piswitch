@@ -45,6 +45,12 @@ def test_cli_model_ambiguous_returns_nonzero():
     assert core.cli_model("z-ai", "20260727-130003", out=lambda *a: None) != 0
 
 
+def test_cli_model_deduplicates_same_builtin_and_custom_target(pi_env):
+    custom = {"providers": {"deepseek": {"models": [{"id": "deepseek-chat"}]}}}
+    (pi_env["agent"] / "models.json").write_text(json.dumps(custom), encoding="utf-8")
+    assert core.cli_model("deepseek/deepseek-chat", "20260727-130004", out=lambda *a: None) == 0
+
+
 def test_dispatch_routes_help_and_list():
     assert core.dispatch(["--help"]) == 0
     core.add_preset({"name": "X", "kind": "builtin", "provider": "nvidia", "model": "z-ai/glm-4"})

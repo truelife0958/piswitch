@@ -34,3 +34,28 @@ def test_write_json_atomic_preserves_mode(pi_env):
     target.chmod(0o600)
     core.write_json_atomic(target, {"k": "v"})
     assert (target.stat().st_mode & 0o777) == 0o600
+
+
+def test_write_json_bundle_rolls_back_prior_files(monkeypatch, pi_env):
+    first = pi_env["agent"] / "models.json"
+    second = pi_env["agent"] / "auth.json"
+    original_first = core.read_json(first, {})
+    original_second = core.read_json(second, {})
+    real_write = core.write_json_atomic
+    failed = False
+
+    def fail_second_once(path, data):
+        nonlocal failed
+        if Path(path) == second and not failed:
+            failed = True
+            raise OSError("simulated write failure")
+        real_write(path, data)
+
+    monkeypatch.setattr(core, "write_json_atomic", fail_second_once)
+    with pytest.raises(OSError, match="simulated"):
+        core.write_json_bundle([(first, {"changed": True}), (second, {"changed": True})])
+
+    assert core.read_json(first, {}) == original_first
+    assert core.read_json(second, {}) == original_second
+
+

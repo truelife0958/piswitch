@@ -1,9 +1,17 @@
 # core.py — 纯逻辑，不 import tkinter
 from __future__ import annotations
-import json, os, shutil, tempfile, uuid
+
+import json
+import os
+import shutil
+import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 
 def agent_dir() -> Path:
@@ -14,12 +22,28 @@ def data_dir() -> Path:
     return Path(os.environ.get("PISWITCH_DATA_DIR", str(Path.home() / ".local" / "share" / "piswitch")))
 
 
-def settings_path() -> Path:      return agent_dir() / "settings.json"
-def models_store_path() -> Path:  return agent_dir() / "models-store.json"
-def models_path() -> Path:        return agent_dir() / "models.json"
-def auth_path() -> Path:          return agent_dir() / "auth.json"
-def presets_path() -> Path:       return data_dir() / "presets.json"
-def switch_backups_dir() -> Path: return data_dir() / "backups"
+def settings_path() -> Path:
+    return agent_dir() / "settings.json"
+
+
+def models_store_path() -> Path:
+    return agent_dir() / "models-store.json"
+
+
+def models_path() -> Path:
+    return agent_dir() / "models.json"
+
+
+def auth_path() -> Path:
+    return agent_dir() / "auth.json"
+
+
+def presets_path() -> Path:
+    return data_dir() / "presets.json"
+
+
+def switch_backups_dir() -> Path:
+    return data_dir() / "backups"
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -50,23 +74,52 @@ def write_json_atomic(path: Path, data: Any) -> None:
         raise
 
 
+def write_json_bundle(updates: list[tuple[Path, Any]]) -> None:
+    originals = {}
+    for path, _data in updates:
+        path = Path(path)
+        originals[path] = (path.exists(), read_json(path, {}) if path.exists() else None)
+
+    written = []
+    try:
+        for path, data in updates:
+            path = Path(path)
+            write_json_atomic(path, data)
+            written.append(path)
+    except Exception:
+        for path in reversed(written):
+            existed, original = originals[path]
+            try:
+                if existed:
+                    write_json_atomic(path, original)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+
 def load_settings() -> dict:
-    return read_json(settings_path(), {}) or {}
+    return _dict_or_empty(read_json(settings_path(), {}))
 
 
 def load_models_store() -> dict:
-    return read_json(models_store_path(), {}) or {}
+    return _dict_or_empty(read_json(models_store_path(), {}))
 
 
 def load_custom() -> dict:
-    data = read_json(models_path(), {}) or {}
-    if "providers" not in data:
+    data = _dict_or_empty(read_json(models_path(), {}))
+    if not isinstance(data.get("providers"), dict):
         data["providers"] = {}
     return data
 
 
 def load_auth() -> dict:
-    return read_json(auth_path(), {}) or {}
+    return _dict_or_empty(read_json(auth_path(), {}))
+
+
+def _dict_or_empty(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
 
 
 def provider_model_map(store: dict, custom: dict) -> dict:
@@ -74,15 +127,18 @@ def provider_model_map(store: dict, custom: dict) -> dict:
     for prov, info in store.items():
         if not isinstance(info, dict):
             continue
-        for m in info.get("models", []) or []:
-            if isinstance(m, dict):
+        models = info.get("models", [])
+        for m in models if isinstance(models, list) else []:
+            if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]:
                 result.setdefault(prov, []).append(
                     {"id": m.get("id"), "name": m.get("name") or m.get("id"), "source": "builtin"})
-    for prov, cfg in custom.get("providers", {}).items():
+    providers = custom.get("providers", {})
+    for prov, cfg in providers.items() if isinstance(providers, dict) else []:
         if not isinstance(cfg, dict):
             continue
-        for m in cfg.get("models", []) or []:
-            if isinstance(m, dict):
+        models = cfg.get("models", [])
+        for m in models if isinstance(models, list) else []:
+            if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]:
                 result.setdefault(prov, []).append(
                     {"id": m.get("id"), "name": m.get("name") or m.get("id"), "source": "custom"})
     for prov in result:
@@ -91,25 +147,46 @@ def provider_model_map(store: dict, custom: dict) -> dict:
 
 
 def resolve_has_key(provider: str, auth: dict, custom: dict) -> bool:
-    if provider in auth and auth[provider].get("key"):
+    auth_entry = auth.get(provider)
+    if isinstance(auth_entry, dict) and auth_entry.get("key"):
         return True
-    ak = custom.get("providers", {}).get(provider, {}).get("apiKey")
+    providers = custom.get("providers", {})
+    cfg = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    ak = cfg.get("apiKey") if isinstance(cfg, dict) else None
     return isinstance(ak, str) and bool(ak.strip())
 
 
 def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id) -> bool:
     if not provider or not model_id:
         return False
-    for m in store.get(provider, {}).get("models", []) or []:
-        if m.get("id") == model_id:
+    builtin = store.get(provider, {})
+    builtin_models = builtin.get("models", []) if isinstance(builtin, dict) else []
+    for m in builtin_models if isinstance(builtin_models, list) else []:
+        if isinstance(m, dict) and m.get("id") == model_id:
             return bool(m.get("reasoning"))
-    for m in custom.get("providers", {}).get(provider, {}).get("models", []) or []:
-        if m.get("id") == model_id:
+    providers = custom.get("providers", {})
+    cfg = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    custom_models = cfg.get("models", []) if isinstance(cfg, dict) else []
+    for m in custom_models if isinstance(custom_models, list) else []:
+        if isinstance(m, dict) and m.get("id") == model_id:
             return bool(m.get("reasoning"))
     return False
 
 
 DEFAULT_INPUT_TYPES = ["text", "image"]
+BACKUP_RETENTION = 20
+HTTP_USER_AGENT = "piswitch/1.0"
+OPENAI_PROXY_COMPAT = {
+    "sendSessionAffinityHeaders": True,
+    "supportsLongCacheRetention": False,
+}
+
+
+def merge_openai_proxy_compat(compat: Any) -> dict:
+    return {
+        **OPENAI_PROXY_COMPAT,
+        **(compat if isinstance(compat, dict) else {}),
+    }
 
 
 def parse_model_ids(text: str) -> list[str]:
@@ -129,13 +206,16 @@ def build_custom_provider_cfg(preset: dict) -> dict:
         "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
         "contextWindow": 128000, "maxTokens": 16384,
     } for i in ids]
-    return {
+    config = {
         "name": preset.get("name") or preset["provider"],
         "baseUrl": preset.get("baseUrl", ""),
         "api": preset.get("api", "openai-completions"),
         "apiKey": preset.get("apiKey", ""),
         "models": models,
     }
+    if config["api"] == "openai-completions":
+        config["compat"] = merge_openai_proxy_compat(preset.get("compat"))
+    return config
 
 
 def fetch_models_url(base: str) -> str:
@@ -145,6 +225,74 @@ def fetch_models_url(base: str) -> str:
     if b.endswith("/v1"):
         return b + "/models"
     return b + "/v1/models"
+
+
+def resolve_api_key_value(api_key: str, environ: dict[str, str] | None = None) -> str:
+    value = (api_key or "").strip()
+    if not value.startswith("$"):
+        return value
+    variable = value[1:].strip("{}")
+    if not variable:
+        raise ValueError("invalid API key environment variable reference")
+    resolved = (environ if environ is not None else os.environ).get(variable, "")
+    if not resolved:
+        raise ValueError(f'environment variable "{variable}" is not set')
+    return resolved
+
+
+def fetch_remote_models(
+    base_url: str,
+    api_key: str,
+    *,
+    timeout: float = 20,
+    opener=None,
+) -> list[dict]:
+    url = fetch_models_url(base_url)
+    parsed_url = urlsplit(url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("base URL must be a valid http:// or https:// URL")
+
+    request = Request(url, headers={
+        "Accept": "application/json",
+        "User-Agent": HTTP_USER_AGENT,
+    })
+    token = resolve_api_key_value(api_key)
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with (opener or urlopen)(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ValueError(f"authentication failed (HTTP {exc.code})") from exc
+        raise ValueError(f"model endpoint returned HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise ValueError(f"cannot connect to model endpoint: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise ValueError("model endpoint request timed out") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("model endpoint did not return valid JSON") from exc
+
+    records = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(records, list) and isinstance(payload, dict):
+        records = payload.get("models")
+    if not isinstance(records, list):
+        raise ValueError("model endpoint response does not contain a model list")
+
+    models = []
+    seen = set()
+    for record in records:
+        if isinstance(record, str):
+            model_id, name = record, record
+        elif isinstance(record, dict):
+            model_id = record.get("id") or record.get("name")
+            name = record.get("name") or model_id
+        else:
+            continue
+        if isinstance(model_id, str) and model_id.strip() and model_id not in seen:
+            models.append({"id": model_id, "name": name if isinstance(name, str) else model_id})
+            seen.add(model_id)
+    return models
 
 
 def format_preset_row(preset: dict, settings: dict) -> str:
@@ -158,7 +306,57 @@ def light_backup(ts: str) -> Path:
     for p in (settings_path(), models_path(), auth_path()):
         if p.exists():
             shutil.copy2(p, dest / p.name)
+    backups = sorted(
+        path for path in switch_backups_dir().glob("switch-*")
+        if path.is_dir()
+    )
+    for old_backup in backups[:-BACKUP_RETENTION]:
+        shutil.rmtree(old_backup, ignore_errors=True)
     return dest
+
+
+def list_switch_backups() -> list[Path]:
+    return sorted(
+        (
+            path for path in switch_backups_dir().glob("switch-*")
+            if path.is_dir()
+        ),
+        reverse=True,
+    )
+
+
+def restore_switch_backup(backup: Path, *, ts: str) -> list[str]:
+    backup = Path(backup).resolve()
+    backup_root = switch_backups_dir().resolve()
+    if backup.parent != backup_root or not backup.name.startswith("switch-") or not backup.is_dir():
+        raise ValueError("invalid backup directory")
+
+    targets = {
+        "settings.json": settings_path(),
+        "models.json": models_path(),
+        "auth.json": auth_path(),
+    }
+    snapshot = {}
+    for name in targets:
+        source = backup / name
+        if source.exists():
+            snapshot[name] = read_json(source, {})
+    if not snapshot:
+        raise ValueError("backup does not contain configuration files")
+
+    light_backup(ts)
+    write_json_bundle([(targets[name], data) for name, data in snapshot.items()])
+    return list(snapshot)
+
+
+def is_default_provider(provider: str, settings: dict | None = None) -> bool:
+    current = settings if settings is not None else load_settings()
+    return current.get("defaultProvider") == provider
+
+
+def is_default_model(provider: str, model_id: str, settings: dict | None = None) -> bool:
+    current = settings if settings is not None else load_settings()
+    return current.get("defaultProvider") == provider and current.get("defaultModel") == model_id
 
 
 def apply_settings(provider: str, model: str, thinking=None) -> dict:
@@ -180,21 +378,176 @@ def merge_custom_provider(preset: dict) -> None:
 
 def merge_auth_key(provider: str, api_key: str) -> None:
     auth = load_auth()
-    auth[provider] = {"type": "apikey", "key": api_key}
+    auth[provider] = {"type": "api_key", "key": api_key}
     write_json_atomic(auth_path(), auth)
 
 
+def _provider_model(model_id: str) -> dict:
+    return {
+        "id": model_id,
+        "name": model_id,
+        "reasoning": False,
+        "input": list(DEFAULT_INPUT_TYPES),
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 128000,
+        "maxTokens": 16384,
+    }
+
+
+def save_custom_provider(
+    provider: str,
+    name: str,
+    base_url: str,
+    api: str,
+    api_key: str,
+    *,
+    ts: str,
+    original_provider: str | None = None,
+) -> dict:
+    provider = provider.strip()
+    name = name.strip()
+    base_url = base_url.strip()
+    api = api.strip()
+    api_key = api_key.strip()
+    if not provider or not name or not base_url or not api:
+        raise ValueError("provider, name, base URL, and API type are required")
+    if any(character.isspace() for character in provider) or "/" in provider:
+        raise ValueError("provider ID cannot contain whitespace or '/'")
+    parsed_url = urlsplit(base_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("base URL must be a valid http:// or https:// URL")
+
+    custom = load_custom()
+    providers = custom["providers"]
+    original = original_provider.strip() if isinstance(original_provider, str) else provider
+    if original_provider is not None and original not in providers:
+        raise ValueError(f'custom provider "{original}" does not exist')
+    if original != provider and provider in providers:
+        raise ValueError(f'custom provider "{provider}" already exists')
+
+    existing = providers.get(original, {})
+    existing = existing if isinstance(existing, dict) else {}
+    config = {
+        **existing,
+        "name": name,
+        "baseUrl": base_url.rstrip("/"),
+        "api": api,
+        "models": existing.get("models", []) if isinstance(existing.get("models"), list) else [],
+    }
+    if api == "openai-completions":
+        config["compat"] = merge_openai_proxy_compat(existing.get("compat"))
+    if api_key:
+        config["apiKey"] = api_key
+    else:
+        config.pop("apiKey", None)
+
+    auth = load_auth()
+    if original != provider:
+        auth.pop(original, None)
+    if api_key:
+        auth[provider] = {"type": "api_key", "key": api_key}
+    else:
+        auth.pop(provider, None)
+
+    settings = load_settings()
+    settings_changed = original != provider and settings.get("defaultProvider") == original
+    if settings_changed:
+        settings["defaultProvider"] = provider
+
+    light_backup(ts)
+    if original != provider:
+        del providers[original]
+    providers[provider] = config
+    updates = [(models_path(), custom), (auth_path(), auth)]
+    if settings_changed:
+        updates.append((settings_path(), settings))
+    write_json_bundle(updates)
+    return config
+
+
+def delete_custom_provider(provider: str, *, ts: str) -> bool:
+    custom = load_custom()
+    if provider not in custom["providers"]:
+        return False
+
+    auth = load_auth()
+    light_backup(ts)
+    del custom["providers"][provider]
+    auth.pop(provider, None)
+    write_json_bundle([(models_path(), custom), (auth_path(), auth)])
+    return True
+
+
+def add_provider_models(provider: str, model_ids: str, *, ts: str) -> list[dict]:
+    ids = parse_model_ids(model_ids)
+    if not ids:
+        raise ValueError("at least one model ID is required")
+
+    custom = load_custom()
+    config = custom["providers"].get(provider)
+    if not isinstance(config, dict):
+        raise ValueError(f'custom provider "{provider}" does not exist')
+    models = config.get("models", [])
+    models = list(models) if isinstance(models, list) else []
+    existing_ids = {
+        model.get("id") for model in models
+        if isinstance(model, dict) and isinstance(model.get("id"), str)
+    }
+    for model_id in ids:
+        if model_id not in existing_ids:
+            models.append(_provider_model(model_id))
+            existing_ids.add(model_id)
+
+    if models == config.get("models", []):
+        return models
+
+    light_backup(ts)
+    config["models"] = models
+    write_json_atomic(models_path(), custom)
+    return models
+
+
+def delete_provider_model(provider: str, model_id: str, *, ts: str) -> bool:
+    custom = load_custom()
+    config = custom["providers"].get(provider)
+    if not isinstance(config, dict):
+        return False
+    models = config.get("models", [])
+    if not isinstance(models, list):
+        return False
+    kept = [
+        model for model in models
+        if not isinstance(model, dict) or model.get("id") != model_id
+    ]
+    if len(kept) == len(models):
+        return False
+
+    light_backup(ts)
+    config["models"] = kept
+    write_json_atomic(models_path(), custom)
+    return True
+
+
 def switch_to(preset: dict, ts: str) -> dict:
+    provider = preset.get("provider")
+    model_ids = parse_model_ids(preset.get("model", ""))
+    if not isinstance(provider, str) or not provider.strip() or not model_ids:
+        raise ValueError("preset requires non-empty provider and model")
     light_backup(ts)
     if preset.get("kind") == "custom":
         merge_custom_provider(preset)
         if preset.get("apiKey"):
             merge_auth_key(preset["provider"], preset["apiKey"])
-    return apply_settings(preset.get("provider"), preset.get("model"), preset.get("thinking"))
+    return apply_settings(provider.strip(), model_ids[0], preset.get("thinking"))
 
 
 def is_active(preset, settings):
-    return preset.get("provider") == settings.get("defaultProvider") and preset.get("model") == settings.get("defaultModel")
+    model_ids = parse_model_ids(preset.get("model", ""))
+    return (
+        preset.get("provider") == settings.get("defaultProvider")
+        and bool(model_ids)
+        and model_ids[0] == settings.get("defaultModel")
+    )
 
 
 def active_preset_id(presets: list, settings: dict):
@@ -207,6 +560,8 @@ def active_preset_id(presets: list, settings: dict):
 def preset_from_current(settings: dict, custom: dict) -> dict:
     prov = settings.get("defaultProvider")
     model = settings.get("defaultModel")
+    if not isinstance(prov, str) or not prov.strip() or not isinstance(model, str) or not model.strip():
+        raise ValueError("current settings do not contain a default provider/model")
     cfg = custom.get("providers", {}).get(prov)
     preset = {
         "id": new_preset_id(),
@@ -225,20 +580,45 @@ def new_preset_id() -> str:
     return uuid.uuid4().hex
 
 
+def _valid_preset(preset: Any, *, require_id: bool = True) -> bool:
+    if not isinstance(preset, dict):
+        return False
+    required = ("name", "provider", "model")
+    if require_id:
+        required = ("id", *required)
+    return all(isinstance(preset.get(key), str) and preset[key].strip() for key in required)
+
+
 def load_presets() -> list:
     data = read_json(presets_path(), {}) or {}
+    if not isinstance(data, dict):
+        return []
     presets = data.get("presets", [])
-    return presets if isinstance(presets, list) else []
+    if not isinstance(presets, list):
+        return []
+    result = []
+    seen_ids = set()
+    for preset in presets:
+        if _valid_preset(preset) and preset["id"] not in seen_ids:
+            result.append(preset)
+            seen_ids.add(preset["id"])
+    return result
 
 
 def save_presets(presets: list) -> None:
+    if not isinstance(presets, list) or not all(_valid_preset(preset) for preset in presets):
+        raise ValueError("every preset requires non-empty id, name, provider, and model")
     write_json_atomic(presets_path(), {"presets": presets})
 
 
 def add_preset(preset: dict) -> dict:
     preset = dict(preset)
     preset.setdefault("id", new_preset_id())
+    if not _valid_preset(preset):
+        raise ValueError("preset requires non-empty name, provider, and model")
     presets = load_presets()
+    if any(existing["id"] == preset["id"] for existing in presets):
+        raise ValueError(f'duplicate preset id: {preset["id"]}')
     presets.append(preset)
     save_presets(presets)
     return preset
@@ -249,6 +629,9 @@ def update_preset(preset_id: str, changes: dict):
     updated = None
     for p in presets:
         if p.get("id") == preset_id:
+            candidate = {**p, **changes}
+            if not _valid_preset(candidate):
+                raise ValueError("preset requires non-empty name, provider, and model")
             p.update(changes)
             updated = p
             break
@@ -267,12 +650,13 @@ def delete_preset(preset_id: str) -> bool:
 
 
 USAGE = (
-    "piswitch — pi 供应商切换器\n"
-    "  piswitch                启动 GUI\n"
-    "  piswitch list | ls      列出预设(*=当前)\n"
-    "  piswitch use <名称>     按预设名切换\n"
-    "  piswitch model <query>  按 provider/model 子串直接切换(兼容 pi-model)\n"
-    "  piswitch --help         本帮助\n"
+    "piswitch — pi 自定义模型供应商管理工具\n"
+    "  piswitch                启动供应商管理 GUI\n"
+    "  piswitch --help         显示帮助\n"
+    "\n兼容命令:\n"
+    "  piswitch list | ls      列出旧版预设(*=当前)\n"
+    "  piswitch use <名称>     按旧版预设名切换\n"
+    "  piswitch model <query>  按 provider/model 子串直接切换\n"
 )
 
 
@@ -316,22 +700,22 @@ def cli_use(name: str, ts: str, out=print) -> int:
 def cli_model(query: str, ts: str, out=print) -> int:
     store, custom = load_models_store(), load_custom()
     pm = provider_model_map(store, custom)
-    matches = []
+    matches = set()
     q = query.lower()
     for prov, models in pm.items():
         for m in models:
             key = f"{prov}/{m['id']}"
             if q in key.lower():
-                matches.append((prov, m["id"]))
+                matches.add((prov, m["id"]))
     if not matches:
         out(f'piswitch: 无模型匹配 "{query}"')
         return 1
     if len(matches) > 1:
         out(f'piswitch: "{query}" 匹配到 {len(matches)} 个，请写更精确：')
-        for prov, mid in matches[:20]:
+        for prov, mid in sorted(matches)[:20]:
             out(f"  {prov}/{mid}")
         return 1
-    prov, mid = matches[0]
+    prov, mid = next(iter(matches))
     light_backup(ts)
     apply_settings(prov, mid)
     out(f"✓ pi 默认模型 → {prov}/{mid}")

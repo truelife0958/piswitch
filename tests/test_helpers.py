@@ -14,9 +14,41 @@ def test_build_custom_provider_cfg():
     assert cfg["baseUrl"] == "https://gw/v1"
     assert cfg["api"] == "openai-completions"
     assert cfg["apiKey"] == "$K"
+    assert cfg["compat"] == {
+        "sendSessionAffinityHeaders": True,
+        "supportsLongCacheRetention": False,
+    }
     ids = [m["id"] for m in cfg["models"]]
     assert "gpt-4o" in ids
     assert cfg["models"][0]["contextWindow"] == 128000  # 默认字段存在
+
+
+def test_build_custom_provider_cfg_preserves_explicit_compat():
+    cfg = core.build_custom_provider_cfg({
+        "name": "Gateway",
+        "provider": "gateway",
+        "model": "m1",
+        "baseUrl": "https://gw/v1",
+        "api": "openai-completions",
+        "compat": {"sendSessionAffinityHeaders": False},
+    })
+    assert cfg["compat"] == {
+        "sendSessionAffinityHeaders": False,
+        "supportsLongCacheRetention": False,
+    }
+
+
+def test_merge_openai_proxy_compat_preserves_all_explicit_settings():
+    compat = core.merge_openai_proxy_compat({
+        "sendSessionAffinityHeaders": False,
+        "supportsLongCacheRetention": True,
+        "supportsUsageInStreaming": False,
+    })
+    assert compat == {
+        "sendSessionAffinityHeaders": False,
+        "supportsLongCacheRetention": True,
+        "supportsUsageInStreaming": False,
+    }
 
 
 def test_fetch_models_url_normalization():

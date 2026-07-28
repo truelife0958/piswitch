@@ -41,8 +41,16 @@ def test_switch_to_custom_merges_models_and_auth():
     models = json.loads((core.agent_dir() / "models.json").read_text(encoding="utf-8"))
     auth = json.loads((core.agent_dir() / "auth.json").read_text(encoding="utf-8"))
     assert set(m["id"] for m in models["providers"]["gw"]["models"]) == {"m1", "m2"}
-    assert auth["gw"] == {"type": "apikey", "key": "$GW"}
+    assert auth["gw"] == {"type": "api_key", "key": "$GW"}
     assert _settings()["defaultProvider"] == "gw"
+    assert _settings()["defaultModel"] == "m1"
+    assert core.is_active(preset, _settings()) is True
+
+
+def test_switch_to_rejects_missing_target_without_backup():
+    with __import__("pytest").raises(ValueError):
+        core.switch_to({"name": "broken", "provider": ""}, "20260727-120003")
+    assert not core.switch_backups_dir().exists()
 
 
 def test_active_detection():
@@ -57,3 +65,8 @@ def test_active_detection():
 def test_preset_from_current():
     p = core.preset_from_current(core.load_settings(), core.load_custom())
     assert p["provider"] == "nvidia" and p["model"] == "z-ai/glm-5.2" and p["kind"] == "builtin"
+
+
+def test_preset_from_current_rejects_missing_target():
+    with __import__("pytest").raises(ValueError):
+        core.preset_from_current({}, {})
