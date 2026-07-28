@@ -1,4 +1,5 @@
 import core
+from pathlib import Path
 
 
 def test_save_custom_provider_creates_config_and_auth():
@@ -131,6 +132,30 @@ def test_delete_custom_provider_removes_auth():
     assert "newapi" not in core.load_custom()["providers"]
     assert "newapi" not in core.load_auth()
     assert core.delete_custom_provider("missing", ts="20260728-100007") is False
+
+
+def test_delete_provider_credentials_only_removes_auth():
+    # deepseek has an api_key entry per the fixture; newapi only has an env-ref apiKey.
+    assert "deepseek" in core.load_auth()
+    assert core.delete_provider_credentials("deepseek", ts="20260728-100008") is True
+    # auth entry is gone
+    assert "deepseek" not in core.load_auth()
+    # idempotent
+    assert core.delete_provider_credentials("deepseek", ts="20260728-100009") is False
+    # unknown provider -> False, no write
+    assert core.delete_provider_credentials("ghost", ts="x") is False
+    # deleting a custom provider with only an env-ref apiKey (no auth entry) is a no-op
+    assert core.delete_provider_credentials("newapi", ts="x") is False
+
+
+def test_delete_provider_credentials_handles_oauth_shape():
+    """A logged-in OAuth provider must be logout-able, same code path."""
+    import json
+    auth = {"corp-x": {"access": "tok", "refresh": "r", "expires": 9_999_999_999_999}}
+    (Path(core.agent_dir()) / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+    assert core.delete_provider_credentials("corp-x", ts="20260728-100010") is True
+    assert "corp-x" not in core.load_auth()
+    assert core.delete_provider_credentials("corp-x", ts="x") is False
 
 
 def test_provider_crud_validates_required_fields():

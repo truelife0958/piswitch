@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+
+def _now_ms() -> int:
+    """Current wall-clock time in milliseconds. Used to evaluate OAuth `expires`.
+    Keep as a function (not a module constant) so tests can monkeypatch it.
+    """
+    return int(time.time() * 1000)
 
 
 def agent_dir() -> Path:
@@ -149,12 +157,73 @@ def provider_model_map(store: dict, custom: dict) -> dict:
 
 def resolve_has_key(provider: str, auth: dict, custom: dict) -> bool:
     auth_entry = auth.get(provider)
-    if isinstance(auth_entry, dict) and auth_entry.get("key"):
-        return True
+    if isinstance(auth_entry, dict):
+        if auth_entry.get("key"):
+            return True
+        # OAuth credentials: consider the provider "has key" if an access token exists.
+        if isinstance(auth_entry.get("access"), str) and auth_entry["access"]:
+            return True
     providers = custom.get("providers", {})
     cfg = providers.get(provider, {}) if isinstance(providers, dict) else {}
     ak = cfg.get("apiKey") if isinstance(cfg, dict) else None
     return isinstance(ak, str) and bool(ak.strip())
+
+
+def auth_kind(provider: str, auth: dict, custom: dict) -> str:
+    """Classify how a provider authenticates.
+
+    Returns one of: 'api_key', 'oauth', or '' (unknown / no auth configured).
+    OAuth here means the pi extension persisted credentials of the shape
+    {access, refresh, expires} rather than the api-key shape {type:'api_key', key}.
+    """
+    auth_entry = auth.get(provider)
+    if isinstance(auth_entry, dict):
+        if isinstance(auth_entry.get("access"), str) and auth_entry["access"]:
+            return "oauth"
+        if auth_entry.get("type") == "api_key" or auth_entry.get("key"):
+            return "api_key"
+    providers = custom.get("providers", {})
+    cfg = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    ak = cfg.get("apiKey") if isinstance(cfg, dict) else None
+    if isinstance(ak, str) and ak.strip():
+        return "api_key"
+    return ""
+
+
+def auth_login_state(provider: str, auth: dict) -> str:
+    """For OAuth entries, return the human-readable login state.
+
+    'logged_in' - access token present and not past `expires`.
+    'expired'    - credentials present but past `expires` (needs extension refresh).
+    'none'      - no OAuth credentials for this provider.
+    """
+    entry = auth.get(provider)
+    if not isinstance(entry, dict):
+        return "none"
+    access = entry.get("access")
+    if not (isinstance(access, str) and access):
+        return "none"
+    expires = entry.get("expires")
+    # `expires` is a ms epoch (per pi docs). Treat missing / non-numeric as not-yet-expired
+    # so we don't mislead users about a freshly written cred.
+    if isinstance(expires, (int, float)) and expires > 0 and expires <= _now_ms():
+        return "expired"
+    return "logged_in"
+
+
+def delete_provider_credentials(provider: str, *, ts: str) -> bool:
+    """Remove only this provider's auth entry (logout-equivalent).
+
+    Leaves the provider's models.json configuration untouched. Returns True if an
+    entry was actually removed. Used for both api_key and OAuth providers.
+    """
+    auth = load_auth()
+    if provider not in auth:
+        return False
+    light_backup(ts)
+    auth.pop(provider, None)
+    write_json_atomic(auth_path(), auth)
+    return True
 
 
 def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id) -> bool:

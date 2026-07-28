@@ -166,3 +166,31 @@ def test_format_preset_row_marks_active():
     assert core.format_preset_row(active, settings).startswith("*")
     assert core.format_preset_row(other, settings).startswith(" ")
     assert "newapi/gpt-4o" in core.format_preset_row(active, settings)
+
+
+def test_auth_kind_classifies_api_key_vs_oauth():
+    apikey_auth = {"newapi": {"type": "api_key", "key": "sk-abc"}}
+    oauth_auth = {"corp-x": {"access": "tok", "refresh": "r", "expires": 99999999999999}}
+    # api_key via auth.json
+    assert core.auth_kind("newapi", apikey_auth, {}) == "api_key"
+    # api_key via custom models.json (no auth entry)
+    custom_ak = {"providers": {"p": {"apiKey": "sk-zzz"}}}
+    assert core.auth_kind("p", {}, custom_ak) == "api_key"
+    # oauth via auth.json access token
+    assert core.auth_kind("corp-x", oauth_auth, {}) == "oauth"
+    # unknown provider / bare entry
+    assert core.auth_kind("ghost", {}, {}) == ""
+    assert core.auth_kind("x", {"x": {"type": "weird"}}, {}) == ""
+    # has_key now True for OAuth too
+    assert core.resolve_has_key("corp-x", oauth_auth, {}) is True
+    assert core.resolve_has_key("corp-x", {"corp-x": {"access":""}}, {}) is False
+
+
+def test_auth_login_state_tracks_expiry():
+    far_future = 9_999_999_999_999
+    assert core.auth_login_state("p", {"p": {"access": "t", "expires": far_future}}) == "logged_in"
+    assert core.auth_login_state("p", {"p": {"access": "t", "expires": 1}}) == "expired"
+    assert core.auth_login_state("p", {"p": {"access": "t"}}) == "logged_in"  # no expires → not-yet-expired
+    assert core.auth_login_state("p", {"p": {"access": ""}}) == "none"
+    assert core.auth_login_state("p", {}) == "none"
+    assert core.auth_login_state("ghost", {"x": {}}) == "none"

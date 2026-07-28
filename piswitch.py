@@ -87,7 +87,7 @@ class App(tk.Tk):
 
         self.provider_tree = ttk.Treeview(
             left,
-            columns=("provider", "name", "models", "key"),
+            columns=("provider", "name", "models", "auth"),
             show="headings",
             selectmode="browse",
         )
@@ -95,7 +95,7 @@ class App(tk.Tk):
             ("provider", "Provider ID", 145),
             ("name", "名称", 145),
             ("models", "模型", 55),
-            ("key", "Key", 45),
+            ("auth", "验证", 80),
         )
         for column, title, width in headings:
             self.provider_tree.heading(column, text=title)
@@ -144,6 +144,8 @@ class App(tk.Tk):
         self.test_connection_button.pack(side="left", padx=(8, 0))
         self.delete_provider_button = ttk.Button(actions, text="删除供应商", command=self.delete_provider)
         self.delete_provider_button.pack(side="left", padx=8)
+        self.logout_provider_button = ttk.Button(actions, text="退出登录", command=self.logout_provider)
+        self.logout_provider_button.pack(side="left", padx=8)
 
         model_header = ttk.Frame(right)
         model_header.pack(fill="x", pady=(2, 6))
@@ -202,14 +204,19 @@ class App(tk.Tk):
                 continue
             models = config.get("models", [])
             model_count = len(models) if isinstance(models, list) else 0
-            auth_entry = auth.get(provider, {})
-            auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
-            has_key = bool(auth_key or config.get("apiKey"))
+            kind = core.auth_kind(provider, auth, custom)
+            if kind == "oauth":
+                state = core.auth_login_state(provider, auth)
+                auth_label = "已登录" if state == "logged_in" else ("已过期" if state == "expired" else "OAuth")
+            elif kind == "api_key":
+                auth_label = "API Key"
+            else:
+                auth_label = "无"
             self.provider_tree.insert(
                 "",
                 "end",
                 iid=provider,
-                values=(provider, config.get("name", provider), model_count, "有" if has_key else "无"),
+                values=(provider, config.get("name", provider), model_count, auth_label),
             )
 
         target = select or self.current_provider
@@ -233,11 +240,29 @@ class App(tk.Tk):
 
     def _load_provider(self, provider: str) -> None:
         custom = core.load_custom()
+        auth = core.load_auth()
         config = custom["providers"].get(provider)
         if not isinstance(config, dict):
             return
-        auth_entry = core.load_auth().get(provider, {})
-        auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
+        auth_entry = auth.get(provider) if isinstance(auth, dict) else None
+        kind = core.auth_kind(provider, auth, custom)
+        if kind == "api_key":
+            auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
+            self.api_key_var.set(auth_key or config.get("apiKey", ""))
+            self.api_key_entry.configure(state="normal")
+        elif kind == "oauth":
+            state = core.auth_login_state(provider, auth)
+            # OAuth access tokens are extension-managed; show read-only status.
+            label = "(OAuth，已登录)" if state == "logged_in" else ("(OAuth，已过期)" if state == "expired" else "(OAuth)")
+            self.api_key_var.set(label)
+            self.api_key_entry.configure(state="disabled")
+        else:
+            self.api_key_var.set(config.get("apiKey", ""))
+            self.api_key_entry.configure(state="normal")
+
+        # Logout / delete-credentials is enabled iff there is an auth.json entry to remove
+        has_auth_entry = isinstance(auth_entry, dict) and bool(auth_entry)
+        self.logout_provider_button.configure(state="normal" if has_auth_entry else "disabled")
 
         self.current_provider = provider
         self.provider_entry.configure(state="normal")
@@ -245,10 +270,8 @@ class App(tk.Tk):
         self.name_var.set(config.get("name", provider))
         self.base_url_var.set(config.get("baseUrl", ""))
         self.api_var.set(config.get("api", API_TYPES[0]))
-        self.api_key_var.set(auth_key or config.get("apiKey", ""))
         self._set_editing_state(True)
         self._refresh_models(config)
-
     def _refresh_models(self, config: dict) -> None:
         self.model_tree.delete(*self.model_tree.get_children())
         models = config.get("models", [])
@@ -518,6 +541,35 @@ class App(tk.Tk):
         self.current_provider = None
         self.refresh_providers()
         self.status_var.set(f"已删除供应商 {provider}")
+
+    def logout_provider(self) -> None:
+        provider = self.current_provider
+        if not provider:
+            return
+        auth = core.load_auth()
+        entry = auth.get(provider)
+        if not isinstance(entry, dict) or not entry:
+            messagebox.showinfo("退出登录", f"{provider} 当前没有存储的凭据")
+            return
+        kind = core.auth_kind(provider, auth, core.load_custom())
+        noun = "OAuth 凭据" if kind == "oauth" else "API Key"
+        prompt = f"删除 {provider} 的{noun}?\n\n这将仅清除凭据,保留该供应商的模型配置。"
+        if kind == "oauth":
+            prompt += (
+                "\n之后需重新走 pi /login 流程来重新登录(由该供应商的扩展负责)。"
+            )
+        if not messagebox.askyesno("退出登录", prompt):
+            return
+        try:
+            removed = core.delete_provider_credentials(provider, ts=mutation_timestamp())
+        except OSError as exc:
+            messagebox.showerror("退出登录失败", str(exc))
+            return
+        if not removed:
+            messagebox.showinfo("退出登录", "未发生变化")
+            return
+        self.refresh_providers(select=provider)
+        self.status_var.set(f"已退出登录 {provider}")
 
     def add_models(self) -> None:
         provider = self.current_provider
