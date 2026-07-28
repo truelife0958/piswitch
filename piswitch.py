@@ -148,8 +148,10 @@ class App(tk.Tk):
         model_header = ttk.Frame(right)
         model_header.pack(fill="x", pady=(2, 6))
         ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        self.clear_models_button = ttk.Button(model_header, text="清空", command=self.clear_models)
+        self.clear_models_button.pack(side="right")
         self.delete_model_button = ttk.Button(model_header, text="删除模型", command=self.delete_model)
-        self.delete_model_button.pack(side="right")
+        self.delete_model_button.pack(side="right", padx=6)
         self.add_model_button = ttk.Button(model_header, text="增加模型", command=self.add_models)
         self.add_model_button.pack(side="right", padx=6)
         self.fetch_model_button = ttk.Button(model_header, text="拉取模型", command=self.fetch_models)
@@ -161,7 +163,7 @@ class App(tk.Tk):
             model_area,
             columns=("id", "name", "reasoning"),
             show="headings",
-            selectmode="browse",
+            selectmode="extended",
         )
         for column, title, width in (
             ("id", "Model ID", 230),
@@ -186,6 +188,7 @@ class App(tk.Tk):
         self.delete_provider_button.configure(state=state)
         self.add_model_button.configure(state=state)
         self.delete_model_button.configure(state=state)
+        self.clear_models_button.configure(state=state)
         self.fetch_model_button.configure(state=state)
 
     def refresh_providers(self, select: str | None = None) -> None:
@@ -308,6 +311,7 @@ class App(tk.Tk):
         self.delete_provider_button.configure(state=edit_state)
         self.add_model_button.configure(state=edit_state)
         self.delete_model_button.configure(state=edit_state)
+        self.clear_models_button.configure(state=edit_state)
         self.fetch_model_button.configure(
             state="disabled" if busy or not self.current_provider else "normal"
         )
@@ -537,23 +541,67 @@ class App(tk.Tk):
         if not provider or not selection:
             messagebox.showinfo("删除模型", "请先选中一个模型")
             return
-        model_id = self.model_tree.item(selection[0], "values")[0]
-        prompt = f"从 {provider} 删除模型 {model_id}？"
-        if core.is_default_model(provider, model_id):
-            prompt = (
-                f"{model_id} 是 pi 当前默认模型。\n\n"
-                "删除后默认模型将不可用，建议先在 pi 中切换默认模型。\n\n"
+        model_ids = [self.model_tree.item(iid, "values")[0] for iid in selection]
+        count = len(model_ids)
+        # Warn if any selected model is currently the pi default.
+        default_hits = [mid for mid in model_ids if core.is_default_model(provider, mid)]
+        if count == 1:
+            prompt = f"从 {provider} 删除模型 {model_ids[0]}？"
+        else:
+            prompt = f"从 {provider} 删除 {count} 个模型？\n" + "\n".join(model_ids[:10])
+            if len(model_ids) > 10:
+                prompt += f"\n… 共 {count} 个"
+        if default_hits:
+            prompt += (
+                f"\n\n其中 {len(default_hits)} 个是 pi 当前默认模型。"
+                "\n删除后默认模型将不可用，建议先在 pi 中切换默认模型。\n\n"
                 "仍然删除？"
             )
         if not messagebox.askyesno("删除模型", prompt):
             return
         try:
-            core.delete_provider_model(provider, model_id, ts=mutation_timestamp())
+            if count == 1:
+                core.delete_provider_model(provider, model_ids[0], ts=mutation_timestamp())
+            else:
+                core.delete_provider_models(provider, model_ids, ts=mutation_timestamp())
         except OSError as exc:
             messagebox.showerror("删除失败", str(exc))
             return
         self.refresh_providers(select=provider)
-        self.status_var.set(f"已删除模型 {model_id}")
+        self.status_var.set(f"已删除 {count} 个模型")
+
+    def clear_models(self) -> None:
+        provider = self.current_provider
+        if not provider:
+            messagebox.showinfo("清空模型", "请先选中一个供应商")
+            return
+        current = core.load_custom().get("providers", {}).get(provider, {}).get("models", [])
+        n = len(current) if isinstance(current, list) else 0
+        if n == 0:
+            self.status_var.set(f"{provider} 已无模型")
+            return
+        prompt = f"清空 {provider} 的全部 {n} 个模型？"
+        # The pi default model may live under this provider.
+        default_id = None
+        settings = core.load_settings() or {}
+        if settings.get("defaultProvider") == provider:
+            default_id = settings.get("defaultModel")
+        if default_id:
+            prompt += (
+                f"\n\n{default_id} 是 pi 当前默认模型。"
+                "\n清空后默认模型将不可用，建议先在 pi 中切换默认模型。\n\n仍然清空？"
+            )
+        else:
+            prompt += "\n\n此操作不可撤销。仍然清空？"
+        if not messagebox.askyesno("清空模型", prompt):
+            return
+        try:
+            removed = core.clear_provider_models(provider, ts=mutation_timestamp())
+        except OSError as exc:
+            messagebox.showerror("清空失败", str(exc))
+            return
+        self.refresh_providers(select=provider)
+        self.status_var.set(f"已清空 {removed} 个模型")
 
     def open_backup_restore(self) -> None:
         backups = core.list_switch_backups()

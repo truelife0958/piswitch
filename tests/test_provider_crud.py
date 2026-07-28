@@ -101,6 +101,31 @@ def test_add_and_delete_provider_models():
     assert core.delete_provider_model("newapi", "missing", ts="20260728-100005") is False
 
 
+def test_delete_provider_models_batch_removes_many_atomic():
+    # newapi starts with one model (gpt-4o) per the shared fixture
+    core.add_provider_models("newapi", "a, b, c, d", ts="20260728-100010")
+    removed = core.delete_provider_models("newapi", ["a", "c", "missing"], ts="20260728-100011")
+    assert removed == 2  # missing not counted
+    assert [m["id"] for m in core.load_custom()["providers"]["newapi"]["models"]] == ["gpt-4o", "b", "d"]
+    # preserves order of remaining models and skips non-string/empty input
+    assert core.delete_provider_models("newapi", [], ts="x") == 0
+    assert core.delete_provider_models("newapi", ["b", 5, None], ts="x") == 1
+    # unknown provider -> 0, no write
+    assert core.delete_provider_models("ghost", ["a"], ts="x") == 0
+
+
+def test_clear_provider_models_empties_all():
+    # newapi starts with one model (gpt-4o) per the shared fixture
+    core.add_provider_models("newapi", "p, q, r", ts="20260728-100020")
+    removed = core.clear_provider_models("newapi", ts="20260728-100021")
+    assert removed == 4  # gpt-4o + p, q, r
+    assert core.load_custom()["providers"]["newapi"]["models"] == []
+    # idempotent: clearing again is 0 and does not write
+    assert core.clear_provider_models("newapi", ts="20260728-100022") == 0
+    # unknown provider -> 0
+    assert core.clear_provider_models("ghost", ts="x") == 0
+
+
 def test_delete_custom_provider_removes_auth():
     assert core.delete_custom_provider("newapi", ts="20260728-100006") is True
     assert "newapi" not in core.load_custom()["providers"]

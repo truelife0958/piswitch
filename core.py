@@ -576,6 +576,55 @@ def delete_provider_model(provider: str, model_id: str, *, ts: str) -> bool:
     return True
 
 
+def delete_provider_models(provider: str, model_ids: list[str], *, ts: str) -> int:
+    """Remove the given model ids from a provider. Returns the count actually removed.
+
+    Atomic single backup/write, even for many ids. Preserves order of remaining models.
+    """
+    if not isinstance(model_ids, list):
+        return 0
+    target = {mid for mid in model_ids if isinstance(mid, str)}
+    if not target:
+        return 0
+
+    custom = load_custom()
+    config = custom["providers"].get(provider) if isinstance(custom.get("providers"), dict) else None
+    if not isinstance(config, dict):
+        return 0
+    models = config.get("models", [])
+    if not isinstance(models, list):
+        return 0
+
+    kept = [
+        model for model in models
+        if not (isinstance(model, dict) and model.get("id") in target)
+    ]
+    removed = len(models) - len(kept)
+    if removed == 0:
+        return 0
+
+    light_backup(ts)
+    config["models"] = kept
+    write_json_atomic(models_path(), custom)
+    return removed
+
+
+def clear_provider_models(provider: str, *, ts: str) -> int:
+    """Remove all models from a provider. Returns the count removed (0 if none)."""
+    custom = load_custom()
+    config = custom["providers"].get(provider) if isinstance(custom.get("providers"), dict) else None
+    if not isinstance(config, dict):
+        return 0
+    models = config.get("models", [])
+    if not isinstance(models, list) or not models:
+        return 0
+    n = len(models)
+    light_backup(ts)
+    config["models"] = []
+    write_json_atomic(models_path(), custom)
+    return n
+
+
 def switch_to(preset: dict, ts: str) -> dict:
     provider = preset.get("provider")
     model_ids = parse_model_ids(preset.get("model", ""))
