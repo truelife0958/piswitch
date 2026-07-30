@@ -46,6 +46,79 @@ def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id)
     return False
 
 
+# Starting points for the provider form. These are conveniences, not authority: the
+# endpoints are recorded from documentation and providers do move them, so the form stays
+# fully editable and 测试连接 is the thing that actually confirms one works.
+#
+# `keyEnv` seeds the API-key field with a $ENV_VAR reference rather than a literal, so a
+# key never lands in models.json and the env indicator tells you at once if it is unset.
+PROVIDER_TEMPLATES = (
+    {"id": "openai", "label": "OpenAI", "baseUrl": "https://api.openai.com/v1",
+     "api": "openai-completions", "keyEnv": "OPENAI_API_KEY"},
+    {"id": "anthropic", "label": "Anthropic", "baseUrl": "https://api.anthropic.com",
+     "api": "anthropic-messages", "keyEnv": "ANTHROPIC_API_KEY"},
+    {"id": "gemini", "label": "Google Gemini",
+     "baseUrl": "https://generativelanguage.googleapis.com",
+     "api": "google-generative-ai", "keyEnv": "GEMINI_API_KEY"},
+    {"id": "deepseek", "label": "DeepSeek", "baseUrl": "https://api.deepseek.com/v1",
+     "api": "openai-completions", "keyEnv": "DEEPSEEK_API_KEY"},
+    {"id": "openrouter", "label": "OpenRouter", "baseUrl": "https://openrouter.ai/api/v1",
+     "api": "openai-completions", "keyEnv": "OPENROUTER_API_KEY"},
+    {"id": "siliconflow", "label": "SiliconFlow 硅基流动",
+     "baseUrl": "https://api.siliconflow.cn/v1",
+     "api": "openai-completions", "keyEnv": "SILICONFLOW_API_KEY"},
+    {"id": "moonshot", "label": "Moonshot 月之暗面", "baseUrl": "https://api.moonshot.cn/v1",
+     "api": "openai-completions", "keyEnv": "MOONSHOT_API_KEY"},
+    {"id": "zhipu", "label": "智谱 GLM", "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+     "api": "openai-completions", "keyEnv": "ZHIPU_API_KEY"},
+    {"id": "dashscope", "label": "阿里云百炼 DashScope",
+     "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "api": "openai-completions", "keyEnv": "DASHSCOPE_API_KEY"},
+    {"id": "groq", "label": "Groq", "baseUrl": "https://api.groq.com/openai/v1",
+     "api": "openai-completions", "keyEnv": "GROQ_API_KEY"},
+    {"id": "together", "label": "Together AI", "baseUrl": "https://api.together.xyz/v1",
+     "api": "openai-completions", "keyEnv": "TOGETHER_API_KEY"},
+    {"id": "ollama", "label": "Ollama (本地)", "baseUrl": "http://localhost:11434/v1",
+     "api": "openai-completions", "keyEnv": ""},
+)
+
+
+def template_by_id(template_id: str) -> dict | None:
+    return next((t for t in PROVIDER_TEMPLATES if t["id"] == template_id), None)
+
+
+def unique_provider_id(base: str, taken) -> str:
+    """`base` if free, else base-2, base-3, ...
+
+    A template id often collides with a builtin pi already ships (deepseek is the common
+    case), and saving over a builtin is refused — so suggest a free id instead of handing
+    the user a form that cannot be saved.
+    """
+    base = (base or "provider").strip() or "provider"
+    taken = set(taken or ())
+    if base not in taken:
+        return base
+    for n in range(2, 1000):
+        candidate = f"{base}-{n}"
+        if candidate not in taken:
+            return candidate
+    return base
+
+
+def template_form_values(template: dict, taken=None) -> dict:
+    """Form field values for a template, with a provider id that is free to use."""
+    if not isinstance(template, dict):
+        raise ValueError("invalid template")
+    key_env = template.get("keyEnv") or ""
+    return {
+        "provider": unique_provider_id(template.get("id", ""), taken),
+        "name": template.get("label") or template.get("id", ""),
+        "baseUrl": template.get("baseUrl", ""),
+        "api": template.get("api") or API_TYPES[0],
+        "apiKey": f"${key_env}" if key_env else "",
+    }
+
+
 # The `api` values pi accepts on a provider. supports_chat_probe keys off these.
 API_TYPES = (
     "openai-completions",

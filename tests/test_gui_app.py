@@ -607,3 +607,75 @@ def test_export_import_roundtrip_through_the_gui(app, monkeypatch, tmp_path):
 
     assert "newapi" in app.provider_tree.get_children()
     assert core.load_custom()["providers"]["newapi"]["apiKey"] == "$NEWAPI_API_KEY"
+
+
+# --- ④ provider template picker --------------------------------------------
+
+def test_template_picker_lists_every_template(app):
+    app.new_from_template()
+    dialog = _toplevels(app)[0]
+    try:
+        tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+        assert len(tree.get_children()) == len(core.PROVIDER_TEMPLATES)
+        assert set(_buttons(dialog)) >= {"使用此模板", "取消"}
+    finally:
+        dialog.destroy()
+
+
+def test_template_picker_fills_the_form_without_saving(app):
+    """A template must not write anything — the endpoints may be stale, so the user
+    checks them (and 测试连接) before committing."""
+    before = core.load_custom()["providers"].copy()
+    app.new_from_template()
+    dialog = _toplevels(app)[0]
+    tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+    index = next(i for i, t in enumerate(core.PROVIDER_TEMPLATES) if t["id"] == "openrouter")
+    tree.selection_set(str(index))
+    _buttons(dialog)["使用此模板"].invoke()
+
+    assert not _toplevels(app), "picker should close after use"
+    assert app.provider_var.get() == "openrouter"
+    assert app.base_url_var.get() == "https://openrouter.ai/api/v1"
+    assert app.api_var.get() == "openai-completions"
+    assert app.api_key_var.get() == "$OPENROUTER_API_KEY"
+    assert app.current_provider is None, "must be a new unsaved provider"
+    assert core.load_custom()["providers"] == before, "nothing may be written yet"
+
+
+def test_template_seeds_an_env_reference_and_the_indicator_reacts(app, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    app.apply_template_values(
+        core.template_form_values(core.template_by_id("openrouter")))
+    assert "未设置" in app.key_status_var.get()
+    assert "OPENROUTER_API_KEY" in app.key_status_var.get()
+
+
+def test_template_avoids_an_id_a_builtin_already_uses(app):
+    """deepseek ships as a builtin in the fixture store; saving over one is refused."""
+    app.new_from_template()
+    dialog = _toplevels(app)[0]
+    tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+    index = next(i for i, t in enumerate(core.PROVIDER_TEMPLATES) if t["id"] == "deepseek")
+    tree.selection_set(str(index))
+    _buttons(dialog)["使用此模板"].invoke()
+
+    assert app.provider_var.get() == "deepseek-2"
+
+
+def test_template_form_can_actually_be_saved(app, monkeypatch):
+    monkeypatch.setattr(piswitch.messagebox, "showerror",
+                        lambda t, m, **k: pytest.fail(f"save refused: {m}"))
+    app.apply_template_values(
+        core.template_form_values(core.template_by_id("groq")))
+    app.save_provider()
+    assert "groq" in core.load_custom()["providers"]
+    assert core.load_custom()["providers"]["groq"]["api"] == "openai-completions"
+
+
+def test_template_picker_cancel_leaves_the_form_alone(app):
+    app.refresh_providers(select="newapi")
+    app.new_from_template()
+    dialog = _toplevels(app)[0]
+    _buttons(dialog)["取消"].invoke()
+    assert not _toplevels(app)
+    assert app.provider_var.get() == "newapi", "cancel must not touch the form"

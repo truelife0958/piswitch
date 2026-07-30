@@ -357,3 +357,60 @@ def import_config(app) -> None:
     if result["invalid"]:
         detail += f"\n\n以下条目格式无效，已忽略：\n" + "\n".join(result["invalid"][:8])
     messagebox.showinfo("导入完成", detail)
+
+
+def choose_template(app) -> None:
+    """Pick a provider template to seed the form.
+
+    The template only fills the form — nothing is written until the user saves, which is
+    deliberate: these endpoints are recorded from documentation and do change, so the user
+    gets a chance to check them (and 测试连接) first.
+    """
+    taken = set(core.load_custom()["providers"]) | set(core.load_models_store())
+    templates = core.PROVIDER_TEMPLATES
+
+    win = tk.Toplevel(app)
+    win.title("从模板新建供应商")
+    win.geometry("640x420")
+    win.transient(app)
+
+    ttk.Label(
+        win,
+        text="模板只填表单，不会立即保存。端点可能变化，保存前请用“测试连接”确认。",
+        padding=(10, 10, 10, 6),
+    ).pack(anchor="w")
+    area = ttk.Frame(win, padding=(10, 0, 10, 8))
+    area.pack(fill="both", expand=True)
+    tree = ttk.Treeview(area, columns=("label", "baseUrl", "api"), show="headings",
+                        selectmode="browse")
+    for column, title, width in (("label", "供应商", 150),
+                                 ("baseUrl", "Base URL", 300),
+                                 ("api", "API 类型", 140)):
+        tree.heading(column, text=title)
+        tree.column(column, width=width, minwidth=60, anchor="w")
+    scroll = ttk.Scrollbar(area, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    scroll.pack(side="right", fill="y")
+    tree.pack(side="left", fill="both", expand=True)
+    for index, tpl in enumerate(templates):
+        tree.insert("", "end", iid=str(index),
+                    values=(tpl["label"], tpl["baseUrl"], tpl["api"]))
+    if templates:
+        tree.selection_set("0")
+        tree.focus("0")
+
+    def use_selected(_event=None) -> None:
+        selection = tree.selection()
+        if not selection:
+            return
+        template = templates[int(selection[0])]
+        values = core.template_form_values(template, taken=taken)
+        win.destroy()
+        app.apply_template_values(values)
+
+    tree.bind("<Double-Button-1>", use_selected)
+
+    buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
+    buttons.pack(fill="x")
+    ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
+    ttk.Button(buttons, text="使用此模板", command=use_selected).pack(side="right", padx=8)

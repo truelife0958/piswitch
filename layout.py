@@ -15,6 +15,7 @@ def build(app) -> None:
     toolbar.pack(fill="x")
     ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
     ttk.Button(toolbar, text="新增", command=app.new_provider).pack(side="right", padx=(6, 0))
+    ttk.Button(toolbar, text="从模板", command=app.new_from_template).pack(side="right", padx=(6, 0))
     ttk.Checkbutton(toolbar, text="显示隐藏", variable=app.show_hidden, command=app.refresh_providers).pack(side="right", padx=(6, 0))
     ttk.Button(toolbar, text="刷新", command=app.refresh_providers).pack(side="right")
     app.check_all_button = ttk.Button(toolbar, text="检查全部", command=app.check_all_providers)

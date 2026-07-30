@@ -337,6 +337,20 @@ class App(tk.Tk):
         self.provider_entry.focus_set()
         self.status_var.set("填写供应商信息后保存")
 
+    def new_from_template(self) -> None:
+        dialogs.choose_template(self)
+
+    def apply_template_values(self, values: dict) -> None:
+        """Seed the form from a template, as a brand-new unsaved provider."""
+        self.new_provider()
+        self.provider_var.set(values["provider"])
+        self.name_var.set(values["name"])
+        self.base_url_var.set(values["baseUrl"])
+        self.api_var.set(values["api"])
+        self.api_key_var.set(values["apiKey"])
+        self._apply_action_states()
+        self.status_var.set(f"已套用模板 {values['name']}——确认 Base URL 与 Key 后保存")
+
     def save_provider(self) -> None:
         provider = self.provider_var.get().strip()
         if core.is_builtin_provider(provider, core.load_models_store()):

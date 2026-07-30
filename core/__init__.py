@@ -52,6 +52,10 @@ from .auth import (
 )
 from .catalog import (
     API_TYPES,
+    PROVIDER_TEMPLATES,
+    template_by_id,
+    template_form_values,
+    unique_provider_id,
     DEFAULT_INPUT_TYPES,
     MODEL_METADATA_KEYS,
     build_custom_provider_cfg,
@@ -127,6 +131,10 @@ from .cli import (
 from .paths import _now_ms  # noqa: F401  (tests monkeypatch the clock)
 
 __all__ = [
+    "unique_provider_id",
+    "template_form_values",
+    "template_by_id",
+    "PROVIDER_TEMPLATES",
     "API_TYPES",
     "mutation_timestamp",
     "ACTION_KEYS",
