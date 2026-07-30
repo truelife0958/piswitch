@@ -686,8 +686,75 @@ def _error_snippet(exc: HTTPError, limit: int = 200) -> str:
     return raw[:limit]
 
 
+def provider_api_key(provider: str, cfg: dict, auth: dict) -> str:
+    """The provider's raw (unresolved) key. auth.json wins over models.json.
+
+    OAuth entries carry `access`, not `key`, so they fall through to models.json here —
+    an OAuth provider has no api key to probe with.
+    """
+    entry = auth.get(provider) if isinstance(auth, dict) else None
+    if isinstance(entry, dict):
+        key = entry.get("key")
+        if isinstance(key, str) and key.strip():
+            return key
+    api_key = cfg.get("apiKey") if isinstance(cfg, dict) else None
+    return api_key if isinstance(api_key, str) else ""
 
 
+def probe_provider(
+    provider: str,
+    cfg: dict,
+    auth: dict,
+    *,
+    deep: bool = False,
+    timeout: float = 10,
+    opener=None,
+    environ: dict[str, str] | None = None,
+) -> dict:
+    """Health-check one provider. Never raises — returns ok/detail/latency_ms.
+
+    Shallow (default) hits `/v1/models`, which is free. `deep=True` sends a real
+    completion, which costs tokens, so the GUI keeps that behind its own button.
+    Reads only: this function writes nothing and takes no backup.
+    """
+    cfg = cfg if isinstance(cfg, dict) else {}
+    base_url = cfg.get("baseUrl") if isinstance(cfg.get("baseUrl"), str) else ""
+    api = cfg.get("api") if isinstance(cfg.get("api"), str) else ""
+    api_key = provider_api_key(provider, cfg, auth)
+    started = time.perf_counter()
+
+    def done(ok: bool, detail: str) -> dict:
+        return {
+            "provider": provider,
+            "ok": ok,
+            "detail": detail,
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+        }
+
+    if not base_url:
+        return done(False, "未配置 Base URL")
+    try:
+        if deep:
+            if not supports_chat_probe(api):
+                return done(False, f"{api or '未知 API 类型'} 不支持对话探测")
+            models = cfg.get("models")
+            first = next(
+                (m["id"] for m in models if isinstance(m, dict)
+                 and isinstance(m.get("id"), str) and m["id"]),
+                None,
+            ) if isinstance(models, list) else None
+            if not first:
+                return done(False, "没有可用于探测的模型")
+            detail = probe_chat(base_url, api, first, api_key,
+                                timeout=timeout, opener=opener, environ=environ)
+            return done(True, detail)
+        found = fetch_remote_models(base_url, api_key, timeout=timeout,
+                                    opener=opener, environ=environ)
+        return done(True, f"{len(found)} 个模型")
+    except ValueError as exc:
+        return done(False, str(exc))
+    except OSError as exc:
+        return done(False, str(exc))
 
 
 def format_context_window(value: Any) -> str:

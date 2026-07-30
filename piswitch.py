@@ -2,6 +2,7 @@
 """Small GUI for managing custom pi model providers."""
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import queue
 import sys
@@ -27,6 +28,10 @@ API_TYPES = (
 )
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "piswitch.png"
 OAUTH_LABELS = {"logged_in": "(OAuth，已登录)", "expired": "(OAuth，已过期)"}
+# Batch health checks run concurrently but stay modest: these are third-party gateways,
+# and a burst of parallel requests is a good way to get rate-limited.
+HEALTH_CHECK_WORKERS = 6
+HEALTH_CHECK_TIMEOUT = 10
 
 
 def mutation_timestamp() -> str:
@@ -69,6 +74,8 @@ class App(tk.Tk):
         self.show_hidden = tk.BooleanVar(value=False)  # show builtin providers the user hid
         self._network_results: queue.Queue = queue.Queue()
         self._network_busy = False
+        # provider id -> last health-check cell text; survives refresh_providers redraws.
+        self._health: dict[str, str] = {}
 
         self._build_ui()
         self.bind("<Control-n>", lambda _event: self.new_provider())
@@ -85,6 +92,8 @@ class App(tk.Tk):
         ttk.Button(toolbar, text="新增", command=self.new_provider).pack(side="right", padx=(6, 0))
         ttk.Checkbutton(toolbar, text="显示隐藏", variable=self.show_hidden, command=self.refresh_providers).pack(side="right", padx=(6, 0))
         ttk.Button(toolbar, text="刷新", command=self.refresh_providers).pack(side="right")
+        self.check_all_button = ttk.Button(toolbar, text="检查全部", command=self.check_all_providers)
+        self.check_all_button.pack(side="right", padx=6)
         ttk.Button(toolbar, text="恢复备份", command=self.open_backup_restore).pack(side="right", padx=6)
 
         pane = ttk.PanedWindow(self, orient="horizontal")
@@ -97,7 +106,7 @@ class App(tk.Tk):
 
         self.provider_tree = ttk.Treeview(
             left,
-            columns=("provider", "name", "models", "auth"),
+            columns=("provider", "name", "models", "auth", "health"),
             show="headings",
             selectmode="browse",
         )
@@ -106,6 +115,7 @@ class App(tk.Tk):
             ("name", "名称", 105),
             ("models", "模型", 42),
             ("auth", "验证", 66),
+            ("health", "状态", 78),
         )
         for column, title, width in headings:
             self.provider_tree.heading(column, text=title)
@@ -236,6 +246,8 @@ class App(tk.Tk):
         self.hide_builtin_button.configure(
             text="恢复显示" if self._current_is_hidden else "从列表移除"
         )
+        # Batch check depends only on the network being idle, not on any selection.
+        self.check_all_button.configure(state="disabled" if self._network_busy else "normal")
 
     def refresh_providers(self, select: str | None = None) -> None:
         custom = core.load_custom()
@@ -265,7 +277,7 @@ class App(tk.Tk):
                 "",
                 "end",
                 iid=provider,
-                values=(provider, label, model_count, auth_label),
+                values=(provider, label, model_count, auth_label, self._health.get(provider, "")),
             )
 
         custom_count = 0
@@ -633,7 +645,61 @@ class App(tk.Tk):
 
         self._run_network("正在测试模型接口与对话…", action, success)
 
+    def check_all_providers(self) -> None:
+        """Health-check every listed provider using the free /v1/models endpoint.
 
+        Deliberately shallow: a real completion costs tokens, so that stays on
+        测试连接 for one provider at a time. Results are display-only — nothing is written.
+        """
+        custom = core.load_custom()
+        auth = core.load_auth()
+        store = core.load_models_store()
+        custom_providers = custom["providers"]
+        targets = [
+            (provider, cfg) for provider, cfg in sorted(custom_providers.items())
+            if isinstance(cfg, dict)
+        ]
+        hidden = set() if self.show_hidden.get() else core.load_hidden_builtins()
+        for provider, info in sorted(store.items()):
+            if provider in custom_providers or not isinstance(info, dict):
+                continue
+            if provider in hidden:
+                continue
+            targets.append((provider, info))
+        if not targets:
+            messagebox.showinfo("检查全部", "没有可检查的供应商。")
+            return
+
+        def action():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=HEALTH_CHECK_WORKERS) as pool:
+                return list(pool.map(
+                    lambda item: core.probe_provider(
+                        item[0], item[1], auth, timeout=HEALTH_CHECK_TIMEOUT,
+                    ),
+                    targets,
+                ))
+
+        self._run_network(f"正在检查 {len(targets)} 个供应商…", action, self._show_health_results)
+
+    def _show_health_results(self, results: list[dict]) -> None:
+        ok_count = 0
+        for result in results:
+            provider = result.get("provider")
+            if result.get("ok"):
+                ok_count += 1
+                cell = f"✓ {result.get('latency_ms', 0)}ms"
+            else:
+                cell = "✗ 失败"
+            self._health[provider] = cell
+            if self.provider_tree.exists(provider):
+                self.provider_tree.set(provider, "health", cell)
+        failed = [r for r in results if not r.get("ok")]
+        self.status_var.set(f"检查完成：{ok_count} 通过，{len(failed)} 失败")
+        if failed:
+            lines = "\n".join(f"{r['provider']}：{r['detail']}" for r in failed[:12])
+            if len(failed) > 12:
+                lines += f"\n… 共 {len(failed)} 个失败"
+            messagebox.showwarning("部分供应商不可用", lines)
 
     def fetch_models(self) -> None:
         if not self.current_provider:

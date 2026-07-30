@@ -273,6 +273,65 @@ def test_context_window_column_is_populated(app):
     assert app.model_tree.set(rows[0], "context") == "—"
 
 
+# --- ⑤ batch health check --------------------------------------------------
+
+def test_check_all_providers_fills_the_health_column(app, monkeypatch):
+    probed = []
+
+    def fake_probe(provider, cfg, auth, **kwargs):
+        probed.append(provider)
+        ok = provider != "nvidia"
+        return {"provider": provider, "ok": ok,
+                "detail": "2 个模型" if ok else "cannot connect to model endpoint: offline",
+                "latency_ms": 42}
+
+    monkeypatch.setattr(core, "probe_provider", fake_probe)
+    warnings = []
+    monkeypatch.setattr(piswitch.messagebox, "showwarning", lambda t, m, **k: warnings.append(m))
+
+    app.check_all_providers()
+    _drain(app)
+
+    # every listed provider was probed: 1 custom + 2 builtins
+    assert set(probed) == {"newapi", "deepseek", "nvidia"}
+    assert app.provider_tree.set("newapi", "health") == "✓ 42ms"
+    assert app.provider_tree.set("nvidia", "health") == "✗ 失败"
+    assert "1 失败" in app.status_var.get()
+    # the failure detail is surfaced, not swallowed
+    assert warnings and "nvidia" in warnings[0] and "offline" in warnings[0]
+
+
+def test_health_column_survives_a_refresh(app, monkeypatch):
+    monkeypatch.setattr(core, "probe_provider", lambda p, c, a, **k: {
+        "provider": p, "ok": True, "detail": "ok", "latency_ms": 7})
+    app.check_all_providers()
+    _drain(app)
+    assert app.provider_tree.set("newapi", "health") == "✓ 7ms"
+
+    app.refresh_providers()
+
+    assert app.provider_tree.set("newapi", "health") == "✓ 7ms"
+
+
+def test_check_all_disables_itself_while_running(app, monkeypatch):
+    monkeypatch.setattr(core, "probe_provider", lambda p, c, a, **k: {
+        "provider": p, "ok": True, "detail": "ok", "latency_ms": 1})
+    app._set_network_busy(True)
+    assert str(app.check_all_button.cget("state")) == "disabled"
+    app._set_network_busy(False)
+    assert str(app.check_all_button.cget("state")) == "normal"
+
+
+def test_batch_check_writes_nothing(app, monkeypatch, pi_env):
+    """⑤ is display-only: no config change, no backup directory."""
+    monkeypatch.setattr(core, "probe_provider", lambda p, c, a, **k: {
+        "provider": p, "ok": True, "detail": "ok", "latency_ms": 1})
+    before = {p.name: p.read_bytes() for p in pi_env["agent"].glob("*.json")}
+
+    app.check_all_providers()
+    _drain(app)
+
+    assert {p.name: p.read_bytes() for p in pi_env["agent"].glob("*.json")} == before
 
 
 # --- ③ deep connection test ------------------------------------------------

@@ -160,3 +160,80 @@ def test_probe_chat_reports_missing_env_var_without_a_request():
     assert not called
 
 
+# --- ⑤ provider health -----------------------------------------------------
+
+def test_provider_api_key_prefers_auth_json():
+    auth = {"p": {"type": "api_key", "key": "from-auth"}}
+    cfg = {"apiKey": "from-models"}
+    assert core.provider_api_key("p", cfg, auth) == "from-auth"
+    assert core.provider_api_key("p", cfg, {}) == "from-models"
+    assert core.provider_api_key("p", {}, {}) == ""
+    # an OAuth entry has no `key`, so fall through to models.json
+    assert core.provider_api_key("p", cfg, {"p": {"access": "tok"}}) == "from-models"
+
+
+def test_probe_provider_shallow_uses_models_endpoint():
+    opener, seen = capture({"data": [{"id": "m1"}, {"id": "m2"}]})
+    result = core.probe_provider(
+        "gw", {"baseUrl": "https://gw/v1", "api": "openai-completions"}, {},
+        opener=opener,
+    )
+    assert seen["url"] == "https://gw/v1/models"
+    assert result["provider"] == "gw"
+    assert result["ok"] is True
+    assert "2" in result["detail"]
+    assert isinstance(result["latency_ms"], int)
+    assert result["latency_ms"] >= 0
+
+
+def test_probe_provider_deep_sends_a_real_completion():
+    opener, seen = capture()
+    result = core.probe_provider(
+        "gw",
+        {"baseUrl": "https://gw/v1", "api": "openai-completions",
+         "models": [{"id": "gpt-4o"}]},
+        {}, deep=True, opener=opener,
+    )
+    assert seen["url"] == "https://gw/v1/chat/completions"
+    assert seen["body"]["model"] == "gpt-4o"
+    assert result["ok"] is True
+
+
+def test_probe_provider_deep_needs_a_model_to_probe_with():
+    result = core.probe_provider(
+        "gw", {"baseUrl": "https://gw/v1", "api": "openai-completions", "models": []},
+        {}, deep=True, opener=lambda *a, **k: None,
+    )
+    assert result["ok"] is False
+    assert "模型" in result["detail"] or "model" in result["detail"]
+
+
+def test_probe_provider_reports_failure_without_raising():
+    """The batch check must survive one bad provider; it returns ok=False, never raises."""
+    def offline(_request, timeout):
+        raise URLError("offline")
+
+    result = core.probe_provider(
+        "gw", {"baseUrl": "https://gw/v1", "api": "openai-completions"}, {}, opener=offline,
+    )
+    assert result["ok"] is False
+    assert "cannot connect" in result["detail"]
+    assert result["provider"] == "gw"
+
+
+def test_probe_provider_rejects_a_provider_with_no_base_url():
+    result = core.probe_provider("gw", {"api": "openai-completions"}, {},
+                                 opener=lambda *a, **k: None)
+    assert result["ok"] is False
+    assert result["detail"]
+
+
+def test_probe_provider_writes_nothing_to_disk(pi_env):
+    """⑤ is display-only by decision — health checking must not mutate config."""
+    before = {p.name: p.read_bytes() for p in pi_env["agent"].glob("*.json")}
+    opener, _seen = capture({"data": [{"id": "m1"}]})
+    core.probe_provider("newapi", core.load_custom()["providers"]["newapi"],
+                        core.load_auth(), opener=opener)
+    after = {p.name: p.read_bytes() for p in pi_env["agent"].glob("*.json")}
+    assert after == before
+    assert not core.switch_backups_dir().exists()
