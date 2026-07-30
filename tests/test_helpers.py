@@ -152,6 +152,66 @@ def test_range_toggle_targets_unknown_iids_returns_empty():
     assert core.range_toggle_targets([], "a", "b", lambda i: False) == []
 
 
+def test_action_states_custom_provider_is_fully_editable():
+    states = core.action_states(busy=False, selected=True, builtin=False, has_oauth=False)
+    assert states["save"] is True
+    assert states["test"] is True
+    assert states["delete_provider"] is True
+    assert states["add_model"] is True
+    assert states["delete_model"] is True
+    assert states["clear_models"] is True
+    assert states["fetch_models"] is True
+    assert states["logout"] is False       # no OAuth credentials to clear
+    assert states["hide_builtin"] is False  # only builtins can be hidden
+
+
+
+
+def test_action_states_builtin_provider_is_read_only():
+    """Builtins live in models-store.json; piswitch must never offer to write them."""
+    states = core.action_states(busy=False, selected=True, builtin=True, has_oauth=False)
+    for key in ("save", "test", "delete_provider", "add_model", "delete_model",
+                "clear_models", "fetch_models"):
+        assert states[key] is False, key
+    assert states["hide_builtin"] is True  # hiding from the list is still allowed
+
+
+def test_action_states_busy_disables_everything():
+    """While a request is in flight nothing that writes may be triggered."""
+    states = core.action_states(busy=True, selected=True, builtin=False, has_oauth=True)
+    assert not any(states.values())
+    assert set(states) == set(core.ACTION_KEYS)
+
+
+def test_action_states_new_provider_mode_allows_only_save_and_test():
+    """No provider selected yet: save/test create it, per-provider actions cannot apply."""
+    states = core.action_states(busy=False, selected=False, builtin=False, has_oauth=False)
+    assert states["save"] is True
+    assert states["test"] is True
+    for key in ("delete_provider", "add_model", "delete_model", "clear_models", "fetch_models"):
+        assert states[key] is False, key
+
+
+def test_action_states_builtin_with_oauth_can_still_log_out():
+    """A logged-in builtin (e.g. an extension-login provider) is read-only but log-out-able."""
+    states = core.action_states(busy=False, selected=True, builtin=True, has_oauth=True)
+    assert states["logout"] is True
+    assert states["save"] is False
+    assert states["hide_builtin"] is True
+
+
+def test_action_states_busy_wins_over_oauth_and_builtin():
+    """Regression: finishing a request must not re-enable buttons the selection forbids.
+
+    The old GUI recomputed busy-state from `selected` alone, so a request started on a
+    custom provider and completing after the user selected a builtin left save/delete
+    enabled on that builtin.
+    """
+    assert core.action_states(busy=True, selected=True, builtin=True, has_oauth=True) == {
+        key: False for key in core.ACTION_KEYS
+    }
+
+
 def test_fetch_models_url_normalization():
     assert core.fetch_models_url("https://gw") == "https://gw/v1/models"
     assert core.fetch_models_url("https://gw/") == "https://gw/v1/models"

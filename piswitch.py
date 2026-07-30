@@ -26,6 +26,7 @@ API_TYPES = (
     "bedrock-converse-stream",
 )
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "piswitch.png"
+OAUTH_LABELS = {"logged_in": "(OAuth，已登录)", "expired": "(OAuth，已过期)"}
 
 
 def mutation_timestamp() -> str:
@@ -53,6 +54,10 @@ class App(tk.Tk):
             pass
 
         self.current_provider: str | None = None
+        # Facts about the current selection that action-button state derives from.
+        self._current_is_builtin = False
+        self._current_has_oauth = False
+        self._current_is_hidden = False
         self.provider_var = tk.StringVar()
         self.name_var = tk.StringVar()
         self.base_url_var = tk.StringVar(value="https://")
@@ -94,10 +99,10 @@ class App(tk.Tk):
             selectmode="browse",
         )
         headings = (
-            ("provider", "Provider ID", 145),
-            ("name", "名称", 145),
-            ("models", "模型", 55),
-            ("auth", "验证", 80),
+            ("provider", "Provider ID", 120),
+            ("name", "名称", 105),
+            ("models", "模型", 42),
+            ("auth", "验证", 66),
         )
         for column, title, width in headings:
             self.provider_tree.heading(column, text=title)
@@ -150,6 +155,13 @@ class App(tk.Tk):
         self.logout_provider_button.pack(side="left", padx=8)
         self.hide_builtin_button = ttk.Button(actions, text="从列表移除", command=self.toggle_hide_builtin)
         self.hide_builtin_button.pack(side="left", padx=8)
+        self._action_buttons = {
+            "save": self.save_provider_button,
+            "test": self.test_connection_button,
+            "delete_provider": self.delete_provider_button,
+            "logout": self.logout_provider_button,
+            "hide_builtin": self.hide_builtin_button,
+        }
 
         model_header = ttk.Frame(right)
         model_header.pack(fill="x", pady=(2, 6))
@@ -162,6 +174,12 @@ class App(tk.Tk):
         self.add_model_button.pack(side="right", padx=6)
         self.fetch_model_button = ttk.Button(model_header, text="拉取模型", command=self.fetch_models)
         self.fetch_model_button.pack(side="right")
+        self._action_buttons.update({
+            "add_model": self.add_model_button,
+            "delete_model": self.delete_model_button,
+            "clear_models": self.clear_models_button,
+            "fetch_models": self.fetch_model_button,
+        })
 
         model_area = ttk.Frame(right)
         model_area.pack(fill="both", expand=True)
@@ -174,7 +192,7 @@ class App(tk.Tk):
         for column, title, width in (
             ("id", "Model ID", 230),
             ("name", "名称", 160),
-            ("reasoning", "推理", 55),
+            ("reasoning", "推理", 50),
         ):
             self.model_tree.heading(column, text=title)
             self.model_tree.column(column, width=width, minwidth=45, anchor="w")
@@ -188,18 +206,24 @@ class App(tk.Tk):
     def _toggle_key_visibility(self) -> None:
         self.api_key_entry.configure(show="" if self.show_key_var.get() else "*")
 
-    def _set_editing_state(self, editing: bool) -> None:
-        self.provider_entry.configure(state="normal")
-        state = "normal" if editing else "disabled"
-        self.save_provider_button.configure(state=state)
-        self.test_connection_button.configure(state=state)
-        self.delete_provider_button.configure(state=state)
-        self.add_model_button.configure(state=state)
-        self.delete_model_button.configure(state=state)
-        self.clear_models_button.configure(state=state)
-        self.fetch_model_button.configure(state=state)
-        # hide-from-list only applies to builtin; _load_provider re-enables it when a builtin is selected
-        self.hide_builtin_button.configure(state="disabled")
+    def _apply_action_states(self) -> None:
+        """Push the derived enable/disable state onto every action button.
+
+        Sole writer of action-button state: selection changes and network transitions both
+        route through here, so they cannot leave contradictory states behind.
+        """
+        states = core.action_states(
+            busy=self._network_busy,
+            selected=bool(self.current_provider),
+            builtin=self._current_is_builtin,
+            has_oauth=self._current_has_oauth,
+        )
+        for key, button in self._action_buttons.items():
+            button.configure(state="normal" if states[key] else "disabled")
+        self.hide_builtin_button.configure(
+            text="恢复显示" if self._current_is_hidden else "从列表移除"
+        )
+
     def refresh_providers(self, select: str | None = None) -> None:
         custom = core.load_custom()
         auth = core.load_auth()
@@ -219,22 +243,25 @@ class App(tk.Tk):
                 auth_label = "无"
             if builtin:
                 auth_label = f"内置·{auth_label}" if auth_label != "无" else "内置"
+            label = config.get("name") or provider
             self.provider_tree.insert(
                 "",
                 "end",
                 iid=provider,
-                values=(provider, config.get("name") or provider, model_count, auth_label),
+                values=(provider, label, model_count, auth_label),
             )
 
+        custom_count = 0
         for provider, config in sorted(custom_providers.items()):
             if not isinstance(config, dict):
                 continue
             models = config.get("models", [])
             model_count = len(models) if isinstance(models, list) else 0
             _insert(provider, config, model_count)
+            custom_count += 1
 
         # Then builtin providers not overridden by a custom entry of the same id.
-        hidden = core.load_hidden_builtins() if not getattr(self, "show_hidden", None) or not self.show_hidden.get() else set()
+        hidden = set() if self.show_hidden.get() else core.load_hidden_builtins()
         for provider, info in sorted(store.items()):
             if provider in custom_providers or not isinstance(info, dict):
                 continue
@@ -255,7 +282,9 @@ class App(tk.Tk):
             first = self.provider_tree.get_children()[0]
             self.provider_tree.selection_set(first)
             self._load_provider(first)
-        self.status_var.set(f"已加载 {len(custom_providers)} 个自定义供应商")
+        # The list holds builtins too, so report both counts rather than only the custom ones.
+        builtin_count = len(self.provider_tree.get_children()) - custom_count
+        self.status_var.set(f"已加载 {custom_count} 个自定义供应商，{builtin_count} 个内置")
 
     def _on_provider_selected(self, _event=None) -> None:
         selection = self.provider_tree.selection()
@@ -273,61 +302,39 @@ class App(tk.Tk):
             if not builtin:
                 return
             config = store.get(provider, {})
-        auth_entry = auth.get(provider) if isinstance(auth, dict) else None
+
+        auth_entry = auth.get(provider)
         kind = core.auth_kind(provider, auth, custom)
-        if kind == "api_key":
-            auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
-            self.api_key_var.set(auth_key or config.get("apiKey", ""))
-            self.api_key_entry.configure(state="normal")
-        elif kind == "oauth":
-            state = core.auth_login_state(provider, auth)
-            # OAuth access tokens are extension-managed; show read-only status.
-            label = "(OAuth，已登录)" if state == "logged_in" else ("(OAuth，已过期)" if state == "expired" else "(OAuth)")
-            self.api_key_var.set(label)
-            self.api_key_entry.configure(state="disabled")
-        else:
-            self.api_key_var.set(config.get("apiKey", ""))
-            self.api_key_entry.configure(state="normal")
-
-
-        # Logout / delete-credentials only makes sense for OAuth/session-login providers;
-        # for api_key providers the user just edits the API-key field directly (no session to end).
-        is_oauth = kind == "oauth"
-        has_oauth_entry = is_oauth and isinstance(auth_entry, dict) and bool(auth_entry)
-        self.logout_provider_button.configure(state="normal" if has_oauth_entry else "disabled")
-        hidden = core.load_hidden_builtins()
-        if builtin:
-            # toggle button text reflects current hide state
-            if provider in hidden:
-                self.hide_builtin_button.configure(text="恢复显示", state="normal")
-            else:
-                self.hide_builtin_button.configure(text="从列表移除", state="normal")
-        else:
-            self.hide_builtin_button.configure(text="从列表移除", state="disabled")
         self.current_provider = provider
-        self.provider_entry.configure(state="normal")
+        self._current_is_builtin = builtin
+        # Logout / delete-credentials needs an actual OAuth entry to clear.
+        self._current_has_oauth = (
+            kind == "oauth" and isinstance(auth_entry, dict) and bool(auth_entry)
+        )
+        self._current_is_hidden = builtin and provider in core.load_hidden_builtins()
+
         self.provider_var.set(provider)
         self.name_var.set(config.get("name") or provider)
         self.base_url_var.set(config.get("baseUrl", ""))
         self.api_var.set(config.get("api", API_TYPES[0]))
-        # Builtin providers are read-only: lock form fields, show store models, disable CRUD.
-        if builtin:
-            # editing-state first disables all action buttons; then we also lock form entry fields
-            self._set_editing_state(False)
-            self.provider_entry.configure(state="disabled")
-            self.name_var.set(config.get("name") or provider + " (内置)")
-            self.base_url_var.set(config.get("baseUrl") or "(内置)")
-            self.api_key_entry.configure(state="disabled")
-            # logout must remain enabled if this is an OAuth provider with an entry;
-            if has_oauth_entry:
-                self.logout_provider_button.configure(state="normal")
-            # hide-from-list toggle is enabled for builtins; text/state reflects current hide status
-            if provider in core.load_hidden_builtins():
-                self.hide_builtin_button.configure(text="恢复显示", state="normal")
-            else:
-                self.hide_builtin_button.configure(text="从列表移除", state="normal")
+        if kind == "oauth":
+            # OAuth access tokens are extension-managed; show read-only status instead.
+            self.api_key_var.set(OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)"))
+        elif kind == "api_key":
+            auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
+            self.api_key_var.set(auth_key or config.get("apiKey", ""))
         else:
-            self._set_editing_state(True)
+            self.api_key_var.set(config.get("apiKey", ""))
+
+        # Builtin providers are read-only: lock the form and label the store's own values.
+        if builtin:
+            self.name_var.set(config.get("name") or f"{provider} (内置)")
+            self.base_url_var.set(config.get("baseUrl") or "(内置)")
+        self.provider_entry.configure(state="disabled" if builtin else "normal")
+        self.api_key_entry.configure(
+            state="normal" if not builtin and kind != "oauth" else "disabled"
+        )
+        self._apply_action_states()
         self._refresh_models(config)
 
     def _refresh_models(self, config: dict) -> None:
@@ -342,22 +349,33 @@ class App(tk.Tk):
                 "",
                 "end",
                 iid=str(index),
-                values=(model["id"], model.get("name", model["id"]), "是" if model.get("reasoning") else "否"),
+                values=(
+                    model["id"],
+                    model.get("name", model["id"]),
+                    "是" if model.get("reasoning") else "否",
+                ),
             )
+
+
 
     def new_provider(self) -> None:
         self.current_provider = None
+        self._current_is_builtin = False
+        self._current_has_oauth = False
+        self._current_is_hidden = False
         selection = self.provider_tree.selection()
         if selection:
             self.provider_tree.selection_remove(*selection)
         self.provider_entry.configure(state="normal")
+        # Re-enable the key field: it is left disabled by an OAuth or builtin selection.
+        self.api_key_entry.configure(state="normal")
         self.provider_var.set("")
         self.name_var.set("")
         self.base_url_var.set("https://")
         self.api_var.set(API_TYPES[0])
         self.api_key_var.set("")
         self.model_tree.delete(*self.model_tree.get_children())
-        self._set_editing_state(True)  # new-provider mode: enable save/test so user can create
+        self._apply_action_states()  # new-provider mode: save/test on, per-provider actions off
         self.provider_entry.focus_set()
         self.status_var.set("填写供应商信息后保存")
 
@@ -389,16 +407,7 @@ class App(tk.Tk):
 
     def _set_network_busy(self, busy: bool) -> None:
         self._network_busy = busy
-        self.test_connection_button.configure(state="disabled" if busy else "normal")
-        self.save_provider_button.configure(state="disabled" if busy else "normal")
-        edit_state = "disabled" if busy or not self.current_provider else "normal"
-        self.delete_provider_button.configure(state=edit_state)
-        self.add_model_button.configure(state=edit_state)
-        self.delete_model_button.configure(state=edit_state)
-        self.clear_models_button.configure(state=edit_state)
-        self.fetch_model_button.configure(
-            state="disabled" if busy or not self.current_provider else "normal"
-        )
+        self._apply_action_states()
 
     def _run_network(self, status: str, action, on_success) -> None:
         if self._network_busy:
@@ -434,6 +443,7 @@ class App(tk.Tk):
         base_url = self.base_url_var.get()
         api_key = self.api_key_var.get()
         return lambda: core.fetch_remote_models(base_url, api_key, timeout=20)
+
 
     def test_connection(self) -> None:
         def success(models: list[dict]) -> None:
@@ -654,6 +664,7 @@ class App(tk.Tk):
             core.hide_builtin(provider)
             self.refresh_providers()
             self.status_var.set(f"已从列表移除 {provider}（勾选顶部“显示隐藏”可重新显示）")
+
     def add_models(self) -> None:
         provider = self.current_provider
         if not provider:
@@ -747,6 +758,8 @@ class App(tk.Tk):
         self.refresh_providers(select=provider)
         self.status_var.set(f"已清空 {removed} 个模型")
 
+
+
     def open_backup_restore(self) -> None:
         backups = core.list_switch_backups()
         if not backups:
@@ -796,18 +809,39 @@ class App(tk.Tk):
             self.status_var.set(f"已恢复 {len(restored)} 个配置文件")
             messagebox.showinfo("恢复完成", "配置已恢复，恢复前状态也已自动备份。")
 
+        buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
+        ttk.Button(buttons, text="恢复所选", command=restore_selected).pack(side="right", padx=8)
+
 
 def main() -> None:
     result = core.dispatch(sys.argv[1:])
     if result is not None:
         raise SystemExit(result)
     try:
-        App().mainloop()
+        app = App()
     except tk.TclError as exc:
         if os.environ.get("PISWITCH_DEBUG"):
             raise
         print(f"[piswitch] 无法启动 GUI: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+    except (OSError, ValueError) as exc:
+        # A malformed models.json / auth.json otherwise dies with a bare traceback —
+        # precisely when the user needs to be told where the backups live.
+        if os.environ.get("PISWITCH_DEBUG"):
+            raise
+        message = (
+            f"读取 pi 配置失败：{exc}\n\n"
+            f"请修复上述文件，或从备份目录手动恢复：\n{core.switch_backups_dir()}"
+        )
+        print(f"[piswitch] {message}", file=sys.stderr)
+        try:
+            messagebox.showerror("piswitch 无法启动", message)
+        except tk.TclError:
+            pass
+        raise SystemExit(1) from exc
+    app.mainloop()
 
 
 if __name__ == "__main__":

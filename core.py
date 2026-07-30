@@ -160,10 +160,8 @@ def load_hidden_builtins() -> set[str]:
 
 def _write_hidden_builtins(ids: set[str]) -> None:
     ids = {x for x in ids if isinstance(x, str) and x}
-    data_dir().mkdir(parents=True, exist_ok=True)
-    hidden_builtins_path().write_text(
-        json.dumps(sorted(ids), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    # Atomic like every other config writer, so an interrupted write cannot truncate the file.
+    write_json_atomic(hidden_builtins_path(), sorted(ids))
 
 
 def hide_builtin(provider: str) -> None:
@@ -180,6 +178,7 @@ def unhide_builtin(provider: str) -> None:
     ids = load_hidden_builtins()
     ids.discard(provider)
     _write_hidden_builtins(ids)
+
 
 def provider_model_map(store: dict, custom: dict) -> dict:
     result: dict[str, list[dict]] = {}
@@ -355,6 +354,49 @@ def range_toggle_targets(iids, anchor_iid, click_iid, is_selected):
     return [(iid, target) for iid in iids[start:end + 1]]
 
 
+ACTION_KEYS = (
+    "save", "test", "delete_provider", "add_model", "delete_model",
+    "clear_models", "fetch_models", "logout", "hide_builtin",
+)
+
+
+def action_states(
+    *,
+    busy: bool,
+    selected: bool,
+    builtin: bool,
+    has_oauth: bool,
+) -> dict[str, bool]:
+    """Which action buttons should be enabled, as one pure derivation.
+
+    The GUI previously computed this in two places — `_set_editing_state` on selection
+    change and `_set_network_busy` on network transitions — which disagreed: finishing a
+    request re-enabled the mutation buttons from `selected` alone, so a request started on
+    a custom provider and completing after the user had selected a read-only builtin left
+    save/delete/clear enabled on that builtin. Deriving every button from the same three
+    facts makes that disagreement unrepresentable.
+
+    - `busy`     a network request is in flight; nothing that writes may run.
+    - `selected` an existing provider is selected (False in new-provider mode).
+    - `builtin`  the selection is shipped in models-store.json and is read-only.
+    - `has_oauth` the selection has extension-managed OAuth credentials to clear.
+    """
+    editable = not busy and not builtin      # form-level: save the form, test its URL
+    mutable = editable and selected          # needs a provider that already exists
+    return {
+        "save": editable,
+        "test": editable,
+        "delete_provider": mutable,
+        "add_model": mutable,
+        "delete_model": mutable,
+        "clear_models": mutable,
+        "fetch_models": mutable,
+        # Logout clears credentials, not config, so it stays available on builtins.
+        "logout": not busy and has_oauth,
+        # Hiding only applies to builtins, and never depends on the form being editable.
+        "hide_builtin": not busy and builtin,
+    }
+
 
 def parse_model_ids(text: str) -> list[str]:
     out: list[str] = []
@@ -405,6 +447,8 @@ def resolve_api_key_value(api_key: str, environ: dict[str, str] | None = None) -
     if not resolved:
         raise ValueError(f'environment variable "{variable}" is not set')
     return resolved
+
+
 
 
 def fetch_remote_models(
@@ -460,6 +504,20 @@ def fetch_remote_models(
             models.append({"id": model_id, "name": name if isinstance(name, str) else model_id})
             seen.add(model_id)
     return models
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def format_preset_row(preset: dict, settings: dict) -> str:
@@ -537,6 +595,8 @@ def apply_settings(provider: str, model: str, thinking=None) -> dict:
     return settings
 
 
+
+
 def merge_custom_provider(preset: dict) -> None:
     custom = load_custom()
     custom.setdefault("providers", {})[preset["provider"]] = build_custom_provider_cfg(preset)
@@ -547,6 +607,18 @@ def merge_auth_key(provider: str, api_key: str) -> None:
     auth = load_auth()
     auth[provider] = {"type": "api_key", "key": api_key}
     write_json_atomic(auth_path(), auth)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _provider_model(model_id: str) -> dict:
@@ -863,6 +935,14 @@ def delete_preset(preset_id: str) -> bool:
         return False
     save_presets(kept)
     return True
+
+
+
+
+
+
+
+
 
 
 USAGE = (
