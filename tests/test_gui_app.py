@@ -181,5 +181,87 @@ def test_key_status_updates_on_provider_selection(app):
     assert "NEWAPI_API_KEY" in app.key_status_var.get()
 
 
+# --- ① set as default ------------------------------------------------------
+
+def test_set_default_points_pi_at_the_selected_model(app):
+    app.refresh_providers(select="newapi")
+    row = app.model_tree.get_children()[0]
+    assert app.model_tree.set(row, "id") == "gpt-4o"
+    app.model_tree.selection_set(row)
+
+    app.set_default()
+
+    assert core.is_default_model("newapi", "gpt-4o") is True
+    assert "newapi/gpt-4o" in app.status_var.get()
+
+
+def test_set_default_marks_the_row_and_the_provider(app):
+    app.refresh_providers(select="newapi")
+    row = app.model_tree.get_children()[0]
+    app.model_tree.selection_set(row)
+    app.set_default()
+
+    # ★ on the model row...
+    marked = [r for r in app.model_tree.get_children() if app.model_tree.set(r, "default") == "★"]
+    assert [app.model_tree.set(r, "id") for r in marked] == ["gpt-4o"]
+    # ...and on the provider row
+    assert app.provider_tree.set("newapi", "name").startswith("★")
+
+
+def test_set_default_works_on_a_builtin_provider(app):
+    """Builtins are read-only config but valid defaults."""
+    app.refresh_providers(select="deepseek")
+    rows = app.model_tree.get_children()
+    app.model_tree.selection_set(rows[0])
+    model_id = app.model_tree.set(rows[0], "id")
+
+    app.set_default()
+
+    assert core.is_default_model("deepseek", model_id) is True
+    assert str(app._action_buttons["set_default"].cget("state")) == "normal"
+    # ...while config editing stays locked
+    assert str(app._action_buttons["save"].cget("state")) == "disabled"
+
+
+def test_set_default_requires_a_model_selection(app, monkeypatch):
+    shown = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: shown.append(m))
+    app.refresh_providers(select="newapi")
+    app.model_tree.selection_remove(*app.model_tree.get_children())
+    app.model_tree.focus("")
+
+    app.set_default()
+
+    assert shown and "模型" in shown[0]
+    # nothing was written
+    assert core.is_default_model("newapi", "gpt-4o") is False
+
+
+def test_set_default_refuses_multiple_selection(app, monkeypatch):
+    shown = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: shown.append(m))
+    core.add_provider_models("newapi", "second-model", ts="20260730-100000")
+    app.refresh_providers(select="newapi")
+    app.model_tree.selection_set(*app.model_tree.get_children())
+
+    app.set_default()
+
+    assert shown and "只选中一个" in shown[0]
+
+
+def test_delete_model_still_reads_the_right_column(app, monkeypatch):
+    """Regression guard: the model tree gained 默认/上下文 columns, so the old
+    positional values[0] read would have deleted the wrong thing."""
+    monkeypatch.setattr(piswitch.messagebox, "askyesno", lambda *a, **k: True)
+    core.add_provider_models("newapi", "doomed-model", ts="20260730-100001")
+    app.refresh_providers(select="newapi")
+    row = next(r for r in app.model_tree.get_children()
+               if app.model_tree.set(r, "id") == "doomed-model")
+    app.model_tree.selection_set(row)
+
+    app.delete_model()
+
+    remaining = {m["id"] for m in core.load_custom()["providers"]["newapi"]["models"]}
+    assert remaining == {"gpt-4o"}
 
 

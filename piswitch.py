@@ -171,6 +171,8 @@ class App(tk.Tk):
         model_header = ttk.Frame(right)
         model_header.pack(fill="x", pady=(2, 6))
         ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        self.set_default_button = ttk.Button(model_header, text="设为默认", command=self.set_default)
+        self.set_default_button.pack(side="left", padx=(10, 0))
         self.clear_models_button = ttk.Button(model_header, text="清空", command=self.clear_models)
         self.clear_models_button.pack(side="right")
         self.delete_model_button = ttk.Button(model_header, text="删除模型", command=self.delete_model)
@@ -184,27 +186,32 @@ class App(tk.Tk):
             "delete_model": self.delete_model_button,
             "clear_models": self.clear_models_button,
             "fetch_models": self.fetch_model_button,
+            "set_default": self.set_default_button,
         })
 
         model_area = ttk.Frame(right)
         model_area.pack(fill="both", expand=True)
         self.model_tree = ttk.Treeview(
             model_area,
-            columns=("id", "name", "reasoning"),
+            columns=("default", "id", "name", "reasoning"),
             show="headings",
             selectmode="extended",
         )
         for column, title, width in (
-            ("id", "Model ID", 230),
+            ("default", "默认", 42),
+            ("id", "Model ID", 196),
             ("name", "名称", 160),
             ("reasoning", "推理", 50),
         ):
             self.model_tree.heading(column, text=title)
-            self.model_tree.column(column, width=width, minwidth=45, anchor="w")
+            self.model_tree.column(column, width=width, minwidth=40, anchor="w")
+        self.model_tree.column("default", anchor="center", stretch=False)
         model_scroll = ttk.Scrollbar(model_area, orient="vertical", command=self.model_tree.yview)
         self.model_tree.configure(yscrollcommand=model_scroll.set)
         self.model_tree.pack(side="left", fill="both", expand=True)
         model_scroll.pack(side="right", fill="y")
+        # Double-click a model row to point pi at it.
+        self.model_tree.bind("<Double-Button-1>", self._on_model_double_click)
 
         ttk.Label(self, textvariable=self.status_var, anchor="w", relief="sunken", padding=(8, 4)).pack(fill="x")
 
@@ -234,6 +241,7 @@ class App(tk.Tk):
         auth = core.load_auth()
         store = core.load_models_store()
         custom_providers = custom["providers"]
+        default_provider = core.load_settings().get("defaultProvider")
         self.provider_tree.delete(*self.provider_tree.get_children())
 
         def _insert(provider: str, config: dict, model_count: int) -> None:
@@ -248,7 +256,10 @@ class App(tk.Tk):
                 auth_label = "无"
             if builtin:
                 auth_label = f"内置·{auth_label}" if auth_label != "无" else "内置"
+            # ★ marks pi's current default provider; cheaper than an extra column.
             label = config.get("name") or provider
+            if provider == default_provider:
+                label = f"★ {label}"
             self.provider_tree.insert(
                 "",
                 "end",
@@ -347,14 +358,19 @@ class App(tk.Tk):
         models = config.get("models", [])
         if not isinstance(models, list):
             return
+        settings = core.load_settings()
+        default_provider = settings.get("defaultProvider")
+        default_model = settings.get("defaultModel")
         for index, model in enumerate(models):
             if not isinstance(model, dict) or not model.get("id"):
                 continue
+            is_default = self.current_provider == default_provider and model["id"] == default_model
             self.model_tree.insert(
                 "",
                 "end",
                 iid=str(index),
                 values=(
+                    "★" if is_default else "",
                     model["id"],
                     model.get("name", model["id"]),
                     "是" if model.get("reasoning") else "否",
@@ -370,7 +386,37 @@ class App(tk.Tk):
             "invalid": "✗ $ 后缺少变量名",
         }.get(state, ""))
 
+    def _on_model_double_click(self, event) -> str | None:
+        if self.model_tree.identify_row(event.y):
+            self.set_default()
+            return "break"
+        return None
 
+    def set_default(self) -> None:
+        """Point pi at the selected model. This is what the tool is named after."""
+        provider = self.current_provider
+        if not provider:
+            messagebox.showinfo("设为默认", "请先选中一个供应商")
+            return
+        selection = self.model_tree.selection() or ((self.model_tree.focus(),)
+                                                    if self.model_tree.focus() else ())
+        if not selection:
+            messagebox.showinfo("设为默认", "请先选中一个模型")
+            return
+        if len(selection) > 1:
+            messagebox.showinfo("设为默认", "请只选中一个模型")
+            return
+        model_id = self.model_tree.set(selection[0], "id")
+        if core.is_default_model(provider, model_id):
+            self.status_var.set(f"{provider}/{model_id} 已经是 pi 默认模型")
+            return
+        try:
+            core.set_default_model(provider, model_id, ts=mutation_timestamp())
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("设为默认失败", str(exc))
+            return
+        self.refresh_providers(select=provider)
+        self.status_var.set(f"pi 默认模型 → {provider}/{model_id}")
 
     def new_provider(self) -> None:
         self.current_provider = None
@@ -707,7 +753,9 @@ class App(tk.Tk):
         if core.is_builtin_provider(provider, core.load_models_store()):
             messagebox.showinfo("删除模型", f"{provider} 是内置供应商，不可修改")
             return
-        model_ids = [self.model_tree.item(iid, "values")[0] for iid in selection]
+        # Column-name access, not positional: the tree gained 默认/上下文 columns and a
+        # positional read here would silently return the wrong field.
+        model_ids = [self.model_tree.set(iid, "id") for iid in selection]
         count = len(model_ids)
         # Warn if any selected model is currently the pi default.
         default_hits = [mid for mid in model_ids if core.is_default_model(provider, mid)]

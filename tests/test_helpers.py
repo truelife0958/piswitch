@@ -163,8 +163,17 @@ def test_action_states_custom_provider_is_fully_editable():
     assert states["fetch_models"] is True
     assert states["logout"] is False       # no OAuth credentials to clear
     assert states["hide_builtin"] is False  # only builtins can be hidden
+    assert states["set_default"] is True
 
 
+def test_action_states_set_default_allowed_on_builtins():
+    """Builtins are read-only config but valid pi defaults, so 设为默认 stays on."""
+    builtin = core.action_states(busy=False, selected=True, builtin=True, has_oauth=False)
+    assert builtin["set_default"] is True
+    assert builtin["save"] is False
+    # ...but there is nothing to point pi at until a provider is selected
+    fresh = core.action_states(busy=False, selected=False, builtin=False, has_oauth=False)
+    assert fresh["set_default"] is False
 
 
 def test_action_states_builtin_provider_is_read_only():

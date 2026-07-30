@@ -47,3 +47,47 @@ def test_api_key_status_agrees_with_resolve_api_key_value():
             assert state in {"env_set", "literal", "empty"}, value
 
 
+# --- ① set_default_model ---------------------------------------------------
+
+def test_set_default_model_writes_settings_and_backs_up():
+    settings = core.set_default_model("newapi", "gpt-4o", ts="20260730-090000")
+    assert settings["defaultProvider"] == "newapi"
+    assert settings["defaultModel"] == "gpt-4o"
+    assert core.load_settings()["defaultProvider"] == "newapi"
+    assert core.load_settings()["defaultModel"] == "gpt-4o"
+    # every mutation snapshots first, like the rest of core
+    assert (core.switch_backups_dir() / "switch-20260730-090000").is_dir()
+
+
+def test_set_default_model_preserves_unrelated_settings():
+    """settings.json holds pi's own keys; switching must not drop them."""
+    before = core.load_settings()
+    assert before["packages"] == ["npm:a", "npm:b"]
+    core.set_default_model("newapi", "gpt-4o", ts="20260730-090001")
+    after = core.load_settings()
+    assert after["packages"] == ["npm:a", "npm:b"]
+    assert after["lastChangelogVersion"] == before["lastChangelogVersion"]
+    assert after["defaultThinkingLevel"] == before["defaultThinkingLevel"]
+
+
+def test_set_default_model_can_target_a_builtin():
+    """Builtins are read-only as config but are perfectly valid as the default."""
+    core.set_default_model("deepseek", "deepseek-chat", ts="20260730-090002")
+    assert core.is_default_model("deepseek", "deepseek-chat") is True
+
+
+def test_set_default_model_rejects_empty_arguments():
+    for provider, model in (("", "m"), ("p", ""), ("  ", "m"), ("p", "  ")):
+        with pytest.raises(ValueError):
+            core.set_default_model(provider, model, ts="x")
+
+
+def test_set_default_model_is_reflected_by_is_default_helpers():
+    core.set_default_model("newapi", "gpt-4o", ts="20260730-090003")
+    assert core.is_default_provider("newapi") is True
+    assert core.is_default_model("newapi", "gpt-4o") is True
+    assert core.is_default_model("newapi", "other") is False
+    # switching again moves both
+    core.set_default_model("nvidia", "z-ai/glm-4", ts="20260730-090004")
+    assert core.is_default_provider("newapi") is False
+    assert core.is_default_model("nvidia", "z-ai/glm-4") is True

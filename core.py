@@ -356,7 +356,7 @@ def range_toggle_targets(iids, anchor_iid, click_iid, is_selected):
 
 ACTION_KEYS = (
     "save", "test", "delete_provider", "add_model", "delete_model",
-    "clear_models", "fetch_models", "logout", "hide_builtin",
+    "clear_models", "fetch_models", "logout", "hide_builtin", "set_default",
 )
 
 
@@ -395,6 +395,9 @@ def action_states(
         "logout": not busy and has_oauth,
         # Hiding only applies to builtins, and never depends on the form being editable.
         "hide_builtin": not busy and builtin,
+        # Pointing pi at a model is independent of whether piswitch may edit that provider,
+        # so builtins qualify — they are read-only config, not invalid defaults.
+        "set_default": not busy and selected,
     }
 
 
@@ -620,6 +623,20 @@ def apply_settings(provider: str, model: str, thinking=None) -> dict:
     return settings
 
 
+def set_default_model(provider: str, model_id: str, *, ts: str) -> dict:
+    """Point pi at this provider/model, snapshotting first.
+
+    The GUI could previously only *warn* that a provider/model was pi's default; setting
+    one required dropping to `piswitch model <query>`. This is the same operation the CLI
+    performs, with the light_backup the CLI path also does. Builtins are valid targets —
+    read-only means piswitch will not rewrite their config, not that pi cannot use them.
+    """
+    provider = (provider or "").strip()
+    model_id = (model_id or "").strip()
+    if not provider or not model_id:
+        raise ValueError("provider and model are required")
+    light_backup(ts)
+    return apply_settings(provider, model_id)
 
 
 def merge_custom_provider(preset: dict) -> None:
