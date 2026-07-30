@@ -51,7 +51,10 @@ def test_write_json_bundle_rolls_back_prior_files(monkeypatch, pi_env):
             raise OSError("simulated write failure")
         real_write(path, data)
 
-    monkeypatch.setattr(core, "write_json_atomic", fail_second_once)
+    # Patch the submodule, not the package: write_json_bundle lives beside
+    # write_json_atomic in core.store and calls it as a module global, so a patch on
+    # the re-exported core.write_json_atomic would not intercept it.
+    monkeypatch.setattr(core.store, "write_json_atomic", fail_second_once)
     with pytest.raises(OSError, match="simulated"):
         core.write_json_bundle([(first, {"changed": True}), (second, {"changed": True})])
 

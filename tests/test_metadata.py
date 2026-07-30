@@ -1,4 +1,8 @@
-"""Tests for real model metadata (②) — replacing the hardcoded placeholder values."""
+"""Tests for real model metadata (②) — replacing the hardcoded placeholder values.
+
+_provider_model is private, so it is reached through its own module (core.catalog)
+rather than the package surface, which only re-exports the public API.
+"""
 import pytest
 
 import core
@@ -6,7 +10,7 @@ import core
 
 def test_provider_model_still_has_placeholder_defaults_without_metadata():
     """The guesses stay as a well-formed fallback; they are just no longer the only option."""
-    model = core._provider_model("m1")
+    model = core.catalog._provider_model("m1")
     assert model["contextWindow"] == 128000
     assert model["maxTokens"] == 16384
     assert model["cost"] == {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
@@ -14,7 +18,7 @@ def test_provider_model_still_has_placeholder_defaults_without_metadata():
 
 
 def test_provider_model_metadata_overrides_field_by_field():
-    model = core._provider_model("m1", {"contextWindow": 200000, "reasoning": True})
+    model = core.catalog._provider_model("m1", {"contextWindow": 200000, "reasoning": True})
     assert model["contextWindow"] == 200000
     assert model["reasoning"] is True
     assert model["maxTokens"] == 16384  # untouched keys keep the fallback
@@ -22,7 +26,7 @@ def test_provider_model_metadata_overrides_field_by_field():
 
 
 def test_provider_model_ignores_unknown_and_none_metadata():
-    model = core._provider_model("m1", {"bogus": 1, "contextWindow": None})
+    model = core.catalog._provider_model("m1", {"bogus": 1, "contextWindow": None})
     assert "bogus" not in model
     assert model["contextWindow"] == 128000
 
