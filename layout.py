@@ -38,19 +38,21 @@ def build(app) -> None:
         selectmode="browse",
     )
     headings = (
-        ("provider", "Provider ID", 120),
-        ("name", "名称", 105),
-        ("models", "模型", 42),
-        ("auth", "验证", 66),
-        ("health", "状态", 78),
+        ("provider", "Provider ID", 112),
+        ("name", "名称", 86),
+        ("models", "模型", 40),
+        ("auth", "验证", 54),
+        ("health", "状态", 48),
     )
     for column, title, width in headings:
         app.provider_tree.heading(column, text=title)
         app.provider_tree.column(column, width=width, minwidth=40, anchor="w")
     provider_scroll = ttk.Scrollbar(left, orient="vertical", command=app.provider_tree.yview)
     app.provider_tree.configure(yscrollcommand=provider_scroll.set)
-    app.provider_tree.pack(side="left", fill="both", expand=True)
+    # Scrollbar first: pack gives the expanding tree every remaining pixel, so a
+    # scrollbar packed after it is allotted nothing and never gets mapped.
     provider_scroll.pack(side="right", fill="y")
+    app.provider_tree.pack(side="left", fill="both", expand=True)
     app.provider_tree.bind("<<TreeviewSelect>>", app._on_provider_selected)
 
     form = ttk.Frame(right)
@@ -135,19 +137,19 @@ def build(app) -> None:
         selectmode="extended",
     )
     for column, title, width in (
-        ("default", "默认", 42),
-        ("id", "Model ID", 196),
-        ("name", "名称", 124),
+        ("default", "默认", 38),
+        ("id", "Model ID", 188),
+        ("name", "名称", 118),
         ("context", "上下文", 72),
-        ("reasoning", "推理", 46),
+        ("reasoning", "推理", 44),
     ):
         app.model_tree.heading(column, text=title)
         app.model_tree.column(column, width=width, minwidth=40, anchor="w")
     app.model_tree.column("default", anchor="center", stretch=False)
     model_scroll = ttk.Scrollbar(model_area, orient="vertical", command=app.model_tree.yview)
     app.model_tree.configure(yscrollcommand=model_scroll.set)
-    app.model_tree.pack(side="left", fill="both", expand=True)
     model_scroll.pack(side="right", fill="y")
+    app.model_tree.pack(side="left", fill="both", expand=True)
     # Double-click a model row to point pi at it.
     app.model_tree.bind("<Double-Button-1>", app._on_model_double_click)
 

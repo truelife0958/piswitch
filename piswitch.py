@@ -45,6 +45,11 @@ class App(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
+        # clam ships TButton with width=-11, i.e. "at least 11 characters wide", so every
+        # button rendered 115px regardless of its label — five of them overflowed the
+        # action row and packed 拉取模型 off-screen entirely. Sizing to the actual text
+        # takes the row from 575px to ~419px, which fits with room to spare.
+        style.configure("TButton", width=0, padding=(9, 4))
 
         self.current_provider: str | None = None
         # Facts about the current selection that action-button state derives from.
