@@ -10,7 +10,7 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import core
 
@@ -95,6 +95,8 @@ class App(tk.Tk):
         self.check_all_button = ttk.Button(toolbar, text="检查全部", command=self.check_all_providers)
         self.check_all_button.pack(side="right", padx=6)
         ttk.Button(toolbar, text="恢复备份", command=self.open_backup_restore).pack(side="right", padx=6)
+        ttk.Button(toolbar, text="导入", command=self.import_config).pack(side="right")
+        ttk.Button(toolbar, text="导出", command=self.export_config).pack(side="right", padx=6)
 
         pane = ttk.PanedWindow(self, orient="horizontal")
         pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
@@ -1034,7 +1036,93 @@ class App(tk.Tk):
         self.refresh_providers(select=provider)
         self.status_var.set(f"已清空 {removed} 个模型")
 
+    def export_config(self) -> None:
+        """Write the provider bundle to a file. core.export_providers removes secrets."""
+        payload = core.export_providers()
+        if not payload["providers"]:
+            messagebox.showinfo("导出配置", "没有可导出的自定义供应商。")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="导出供应商配置",
+            defaultextension=".json",
+            initialfile=f"piswitch-providers-{datetime.now().strftime('%Y%m%d')}.json",
+            filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            core.write_json_atomic(Path(path), payload)
+        except OSError as exc:
+            messagebox.showerror("导出失败", str(exc))
+            return
+        count = len(payload["providers"])
+        self.status_var.set(f"已导出 {count} 个供应商 → {Path(path).name}")
+        messagebox.showinfo(
+            "导出完成",
+            f"已导出 {count} 个供应商。\n\n"
+            "文件不含 API Key。$ENV_VAR 形式的引用会保留，\n"
+            "导入方需自行设置对应的环境变量。",
+        )
 
+    def import_config(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="导入供应商配置",
+            filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            payload = core.read_json(Path(path), None)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("导入失败", str(exc))
+            return
+        incoming = payload.get("providers") if isinstance(payload, dict) else None
+        if not isinstance(incoming, dict) or not incoming:
+            messagebox.showerror("导入失败", "导入文件不包含任何供应商")
+            return
+
+        existing = set(core.load_custom()["providers"])
+        clashes = sorted(name for name in incoming if name in existing)
+        prompt = f"将导入 {len(incoming)} 个供应商。\n\n"
+        overwrite = False
+        if clashes:
+            prompt += (
+                f"其中 {len(clashes)} 个已存在：\n"
+                + "\n".join(clashes[:8])
+                + (f"\n… 共 {len(clashes)} 个\n\n" if len(clashes) > 8 else "\n\n")
+                + "点“是”覆盖它们，点“否”只导入新的供应商。"
+            )
+            answer = messagebox.askyesnocancel("导入配置", prompt)
+            if answer is None:
+                return
+            overwrite = bool(answer)
+        else:
+            prompt += "继续？"
+            if not messagebox.askyesno("导入配置", prompt):
+                return
+
+        try:
+            result = core.import_providers(
+                payload, ts=mutation_timestamp(), overwrite=overwrite
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("导入失败", str(exc))
+            return
+
+        self.current_provider = None
+        self.refresh_providers()
+        summary = (
+            f"新增 {len(result['added'])} 个，"
+            f"覆盖 {len(result['overwritten'])} 个，"
+            f"跳过 {len(result['skipped'])} 个"
+        )
+        self.status_var.set(f"导入完成：{summary}")
+        detail = summary
+        if result["invalid"]:
+            detail += f"\n\n以下条目格式无效，已忽略：\n" + "\n".join(result["invalid"][:8])
+        messagebox.showinfo("导入完成", detail)
 
     def open_backup_restore(self) -> None:
         backups = core.list_switch_backups()

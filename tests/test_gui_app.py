@@ -4,6 +4,7 @@ The rest of the GUI suite only imports piswitch, which is why a dialog that buil
 buttons at all (open_backup_restore) shipped unnoticed. These tests need a display;
 they skip when tkinter cannot open one.
 """
+import json
 import tkinter as tk
 
 import pytest
@@ -476,3 +477,132 @@ def test_imported_models_inherit_builtin_metadata(app, monkeypatch):
     assert imported["reasoning"] is True  # inherited from the builtin store, not defaulted
 
 
+# --- ⑦ import / export -----------------------------------------------------
+
+def test_export_button_writes_a_secretless_file(app, monkeypatch, tmp_path):
+    core.save_custom_provider("secret", "Secret", "https://s.example/v1",
+                              "openai-completions", "sk-do-not-leak", ts="20260730-160000")
+    target = tmp_path / "out.json"
+    monkeypatch.setattr(piswitch.filedialog, "asksaveasfilename", lambda **k: str(target))
+    infos = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: infos.append(m))
+
+    app.export_config()
+
+    written = target.read_text(encoding="utf-8")
+    assert "sk-do-not-leak" not in written
+    payload = json.loads(written)
+    assert payload["kind"] == "piswitch-providers"
+    assert "apiKey" not in payload["providers"]["secret"]
+    assert payload["providers"]["newapi"]["apiKey"] == "$NEWAPI_API_KEY"
+    assert infos and "不含 API Key" in infos[0]
+
+
+def test_export_cancelled_writes_nothing(app, monkeypatch, tmp_path):
+    target = tmp_path / "should-not-exist.json"
+    monkeypatch.setattr(piswitch.filedialog, "asksaveasfilename", lambda **k: "")
+    written = []
+    monkeypatch.setattr(core, "write_json_atomic", lambda *a, **k: written.append(a))
+
+    app.export_config()
+
+    assert not target.exists()
+    assert not written
+
+
+def test_import_button_adds_providers_and_refreshes(app, monkeypatch, tmp_path):
+    bundle = tmp_path / "in.json"
+    bundle.write_text(json.dumps({
+        "kind": "piswitch-providers", "version": 1,
+        "providers": {"imported": {
+            "name": "Imported", "baseUrl": "https://i.example/v1",
+            "api": "openai-completions", "models": [{"id": "m1", "name": "m1"}],
+        }},
+    }), encoding="utf-8")
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(piswitch.messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+
+    app.import_config()
+
+    assert "imported" in core.load_custom()["providers"]
+    assert "imported" in app.provider_tree.get_children()  # list refreshed
+    assert "新增 1" in app.status_var.get()
+
+
+def test_import_declining_overwrite_keeps_local_config(app, monkeypatch, tmp_path):
+    bundle = tmp_path / "in.json"
+    bundle.write_text(json.dumps({
+        "kind": "piswitch-providers", "version": 1,
+        "providers": {"newapi": {
+            "name": "Overwritten", "baseUrl": "https://x/v1", "api": "openai-completions",
+        }},
+    }), encoding="utf-8")
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(bundle))
+    # askyesnocancel -> False means "only import new ones"
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: False)
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+
+    app.import_config()
+
+    assert core.load_custom()["providers"]["newapi"]["name"] == "NewAPI"
+
+
+def test_import_cancel_on_the_clash_prompt_does_nothing(app, monkeypatch, tmp_path):
+    bundle = tmp_path / "in.json"
+    bundle.write_text(json.dumps({
+        "kind": "piswitch-providers", "version": 1,
+        "providers": {"newapi": {"baseUrl": "https://x/v1", "api": "openai-completions"}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: None)
+    called = []
+    monkeypatch.setattr(core, "import_providers",
+                        lambda *a, **k: called.append(1) or {})
+
+    app.import_config()
+
+    assert not called
+
+
+def test_import_reports_a_corrupt_file(app, monkeypatch, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(bad))
+    errors = []
+    monkeypatch.setattr(piswitch.messagebox, "showerror", lambda t, m, **k: errors.append(m))
+
+    app.import_config()
+
+    assert errors
+
+
+def test_import_rejects_a_foreign_json_file(app, monkeypatch, tmp_path):
+    foreign = tmp_path / "other.json"
+    foreign.write_text(json.dumps({"hello": "world"}), encoding="utf-8")
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(foreign))
+    errors = []
+    monkeypatch.setattr(piswitch.messagebox, "showerror", lambda t, m, **k: errors.append(m))
+
+    app.import_config()
+
+    assert errors and "供应商" in errors[0]
+
+
+def test_export_import_roundtrip_through_the_gui(app, monkeypatch, tmp_path):
+    bundle = tmp_path / "trip.json"
+    monkeypatch.setattr(piswitch.filedialog, "asksaveasfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(piswitch.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+    monkeypatch.setattr(piswitch.messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: True)
+
+    app.export_config()
+    core.delete_custom_provider("newapi", ts="20260730-160001")
+    app.refresh_providers()
+    assert "newapi" not in app.provider_tree.get_children()
+
+    app.import_config()
+
+    assert "newapi" in app.provider_tree.get_children()
+    assert core.load_custom()["providers"]["newapi"]["apiKey"] == "$NEWAPI_API_KEY"
