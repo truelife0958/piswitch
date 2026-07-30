@@ -449,6 +449,31 @@ def resolve_api_key_value(api_key: str, environ: dict[str, str] | None = None) -
     return resolved
 
 
+def api_key_status(api_key: str, environ: dict[str, str] | None = None) -> tuple[str, str]:
+    """Classify an API-key field so the form can show it inline.
+
+    `resolve_api_key_value` only raises at fetch time, which means a `$VAR` typo or an
+    unexported variable looks fine until a request fails. This is the same decision made
+    eagerly, for display. Returns `(state, variable_name)` where state is one of:
+
+    'empty'       nothing entered
+    'literal'     a key typed in directly; no environment lookup needed
+    'env_set'     a `$VAR` reference whose variable is set and non-empty
+    'env_missing' a `$VAR` reference that would raise on use
+    'invalid'     `$` or `${}` with no variable name
+
+    Kept in agreement with `resolve_api_key_value` by test_api_key_status_agrees_*.
+    """
+    value = (api_key or "").strip()
+    if not value:
+        return ("empty", "")
+    if not value.startswith("$"):
+        return ("literal", "")
+    variable = value[1:].strip("{}")
+    if not variable:
+        return ("invalid", "")
+    env = environ if environ is not None else os.environ
+    return ("env_set" if env.get(variable) else "env_missing", variable)
 
 
 def fetch_remote_models(

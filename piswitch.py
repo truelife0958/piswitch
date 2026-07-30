@@ -63,6 +63,7 @@ class App(tk.Tk):
         self.base_url_var = tk.StringVar(value="https://")
         self.api_var = tk.StringVar(value=API_TYPES[0])
         self.api_key_var = tk.StringVar()
+        self.key_status_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="就绪")
         self.show_hidden = tk.BooleanVar(value=False)  # show builtin providers the user hid
@@ -72,6 +73,8 @@ class App(tk.Tk):
         self._build_ui()
         self.bind("<Control-n>", lambda _event: self.new_provider())
         self.bind("<Control-s>", lambda _event: self.save_provider())
+        # Re-evaluate the $ENV_VAR indicator as the field is typed into.
+        self.api_key_var.trace_add("write", lambda *_a: self._refresh_key_status())
         self.after(100, self._poll_network_results)
         self.refresh_providers()
 
@@ -142,6 +145,8 @@ class App(tk.Tk):
             variable=self.show_key_var,
             command=self._toggle_key_visibility,
         ).grid(row=4, column=2, sticky="e", padx=(8, 0))
+        self.key_status_label = ttk.Label(form, textvariable=self.key_status_var, anchor="w")
+        self.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 2))
 
         actions = ttk.Frame(right)
         actions.pack(fill="x", pady=(10, 14))
@@ -355,6 +360,15 @@ class App(tk.Tk):
                     "是" if model.get("reasoning") else "否",
                 ),
             )
+
+    def _refresh_key_status(self) -> None:
+        """Show whether a `$ENV_VAR` key would actually resolve, without waiting for a request."""
+        state, variable = core.api_key_status(self.api_key_var.get())
+        self.key_status_var.set({
+            "env_set": f"✓ 环境变量 ${variable} 已设置",
+            "env_missing": f"✗ 环境变量 ${variable} 未设置——请求时会失败",
+            "invalid": "✗ $ 后缺少变量名",
+        }.get(state, ""))
 
 
 

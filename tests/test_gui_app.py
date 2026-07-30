@@ -153,6 +153,32 @@ def test_new_provider_reenables_the_api_key_field(app, monkeypatch):
     assert str(app._action_buttons["save"].cget("state")) == "normal"
 
 
+# --- ⑥ $ENV_VAR indicator --------------------------------------------------
+
+def test_key_status_reports_missing_env_var_while_typing(app, monkeypatch):
+    monkeypatch.delenv("PISWITCH_TEST_KEY", raising=False)
+    app.api_key_var.set("$PISWITCH_TEST_KEY")
+    assert "未设置" in app.key_status_var.get()
+    assert "PISWITCH_TEST_KEY" in app.key_status_var.get()
+
+
+def test_key_status_reports_set_env_var(app, monkeypatch):
+    monkeypatch.setenv("PISWITCH_TEST_KEY", "resolved")
+    app.api_key_var.set("$PISWITCH_TEST_KEY")
+    assert "✓" in app.key_status_var.get()
+
+
+def test_key_status_is_silent_for_literal_and_empty_keys(app):
+    app.api_key_var.set("sk-literal-key")
+    assert app.key_status_var.get() == ""
+    app.api_key_var.set("")
+    assert app.key_status_var.get() == ""
+
+
+def test_key_status_updates_on_provider_selection(app):
+    """newapi's fixture key is $NEWAPI_API_KEY, which is not exported in the test env."""
+    app.refresh_providers(select="newapi")
+    assert "NEWAPI_API_KEY" in app.key_status_var.get()
 
 
 
