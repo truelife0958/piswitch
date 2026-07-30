@@ -193,15 +193,16 @@ class App(tk.Tk):
         model_area.pack(fill="both", expand=True)
         self.model_tree = ttk.Treeview(
             model_area,
-            columns=("default", "id", "name", "reasoning"),
+            columns=("default", "id", "name", "context", "reasoning"),
             show="headings",
             selectmode="extended",
         )
         for column, title, width in (
             ("default", "默认", 42),
             ("id", "Model ID", 196),
-            ("name", "名称", 160),
-            ("reasoning", "推理", 50),
+            ("name", "名称", 124),
+            ("context", "上下文", 72),
+            ("reasoning", "推理", 46),
         ):
             self.model_tree.heading(column, text=title)
             self.model_tree.column(column, width=width, minwidth=40, anchor="w")
@@ -373,6 +374,7 @@ class App(tk.Tk):
                     "★" if is_default else "",
                     model["id"],
                     model.get("name", model["id"]),
+                    core.format_context_window(model.get("contextWindow")),
                     "是" if model.get("reasoning") else "否",
                 ),
             )
@@ -387,10 +389,90 @@ class App(tk.Tk):
         }.get(state, ""))
 
     def _on_model_double_click(self, event) -> str | None:
-        if self.model_tree.identify_row(event.y):
+        if not self.model_tree.identify_row(event.y):
+            return None
+        # The 默认 column doubles as the set-default hit area; elsewhere edits metadata.
+        if self.model_tree.identify_column(event.x) == "#1":
             self.set_default()
-            return "break"
-        return None
+        else:
+            self.edit_model()
+        return "break"
+
+    def edit_model(self) -> None:
+        """Edit a model's metadata — the numbers pi uses for context limits and cost."""
+        provider = self.current_provider
+        selection = self.model_tree.selection() or (
+            (self.model_tree.focus(),) if self.model_tree.focus() else ()
+        )
+        if not provider or not selection:
+            messagebox.showinfo("编辑模型", "请先选中一个模型")
+            return
+        if core.is_builtin_provider(provider, core.load_models_store()):
+            messagebox.showinfo("编辑模型", f"{provider} 是内置供应商，不可修改")
+            return
+        model_id = self.model_tree.set(selection[0], "id")
+        models = core.load_custom()["providers"].get(provider, {}).get("models", [])
+        model = next(
+            (m for m in models if isinstance(m, dict) and m.get("id") == model_id), None
+        )
+        if model is None:
+            messagebox.showerror("编辑模型", f"模型 {model_id} 已不存在")
+            return
+        self._open_model_editor(provider, model)
+
+    def _open_model_editor(self, provider: str, model: dict) -> None:
+        win = tk.Toplevel(self)
+        win.title(f"编辑模型 {model['id']}")
+        win.transient(self)
+        body = ttk.Frame(win, padding=(12, 12, 12, 6))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        cost = model.get("cost") if isinstance(model.get("cost"), dict) else {}
+
+        def text_of(value) -> str:
+            return "" if value in (None, "") else str(value)
+
+        fields = (
+            ("名称", "name", tk.StringVar(value=text_of(model.get("name") or model["id"]))),
+            ("上下文窗口", "contextWindow", tk.StringVar(value=text_of(model.get("contextWindow")))),
+            ("最大输出 tokens", "maxTokens", tk.StringVar(value=text_of(model.get("maxTokens")))),
+            ("输入价格 /百万", "costInput", tk.StringVar(value=text_of(cost.get("input", 0)))),
+            ("输出价格 /百万", "costOutput", tk.StringVar(value=text_of(cost.get("output", 0)))),
+        )
+        for index, (label, _key, variable) in enumerate(fields):
+            ttk.Label(body, text=label).grid(row=index, column=0, sticky="w", padx=(0, 10), pady=4)
+            ttk.Entry(body, textvariable=variable, width=26).grid(
+                row=index, column=1, sticky="ew", pady=4
+            )
+        reasoning_var = tk.BooleanVar(value=bool(model.get("reasoning")))
+        ttk.Checkbutton(body, text="支持推理 (reasoning)", variable=reasoning_var).grid(
+            row=len(fields), column=1, sticky="w", pady=(6, 0)
+        )
+        ttk.Label(body, text="留空表示未知，不会写成 0。").grid(
+            row=len(fields) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+        self._model_editor = win  # let tests reach the open dialog
+
+        def save() -> None:
+            raw = {key: variable.get() for _label, key, variable in fields}
+            raw["reasoning"] = reasoning_var.get()
+            try:
+                changes = core.parse_model_edits(raw, existing=model)
+                core.update_provider_model(
+                    provider, model["id"], changes, ts=mutation_timestamp()
+                )
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("保存失败", str(exc), parent=win)
+                return
+            win.destroy()
+            self.refresh_providers(select=provider)
+            self.status_var.set(f"已更新模型 {model['id']}")
+
+        buttons = ttk.Frame(win, padding=(12, 0, 12, 12))
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
+        ttk.Button(buttons, text="保存", command=save).pack(side="right", padx=8)
 
     def set_default(self) -> None:
         """Point pi at the selected model. This is what the tool is named after."""
@@ -636,7 +718,23 @@ class App(tk.Tk):
                 win.destroy()
                 return
             try:
-                core.add_provider_models(provider, ",".join(selected_ids), ts=mutation_timestamp())
+                # Prefer real metadata: whatever the gateway reported, overridden by
+                # pi's own numbers when a builtin ships the same model id.
+                store = core.load_models_store()
+                wanted = set(selected_ids)
+                metadata = {}
+                for model in models:
+                    model_id = model.get("id")
+                    if model_id not in wanted:
+                        continue
+                    merged = dict(model.get("meta") or {})
+                    merged.update(core.builtin_model_metadata(model_id, store))
+                    if merged:
+                        metadata[model_id] = merged
+                core.add_provider_models(
+                    provider, ",".join(selected_ids),
+                    ts=mutation_timestamp(), metadata=metadata,
+                )
             except (OSError, ValueError) as exc:
                 messagebox.showerror("导入失败", str(exc), parent=win)
                 return
@@ -737,7 +835,16 @@ class App(tk.Tk):
         if model_ids is None:
             return
         try:
-            core.add_provider_models(provider, model_ids, ts=mutation_timestamp())
+            # A hand-typed id may already be described in models-store.json.
+            store = core.load_models_store()
+            metadata = {}
+            for model_id in core.parse_model_ids(model_ids):
+                inferred = core.builtin_model_metadata(model_id, store)
+                if inferred:
+                    metadata[model_id] = inferred
+            core.add_provider_models(
+                provider, model_ids, ts=mutation_timestamp(), metadata=metadata
+            )
         except (OSError, ValueError) as exc:
             messagebox.showerror("增加失败", str(exc))
             return

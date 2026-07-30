@@ -265,3 +265,98 @@ def test_delete_model_still_reads_the_right_column(app, monkeypatch):
     assert remaining == {"gpt-4o"}
 
 
+def test_context_window_column_is_populated(app):
+    app.refresh_providers(select="deepseek")
+    rows = app.model_tree.get_children()
+    # The fixture's builtin models carry no contextWindow, so they must read as unknown
+    # rather than as a fabricated number.
+    assert app.model_tree.set(rows[0], "context") == "—"
+
+
+
+
+
+
+# --- ② model metadata editor -----------------------------------------------
+
+def test_model_editor_opens_with_current_values_and_saves(app):
+    core.update_provider_model("newapi", "gpt-4o", {"contextWindow": 4096},
+                               ts="20260730-120000")
+    app.refresh_providers(select="newapi")
+    row = app.model_tree.get_children()[0]
+    app.model_tree.selection_set(row)
+
+    app.edit_model()
+    editor = app._model_editor
+    try:
+        buttons = _buttons(editor)
+        assert set(buttons) >= {"保存", "取消"}
+        entries = [w for w in _all_widgets(editor) if w.winfo_class() == "TEntry"]
+        # 名称 / 上下文 / 最大输出 / 输入价 / 输出价
+        assert len(entries) == 5
+        assert entries[1].get() == "4096"
+        entries[1].delete(0, "end")
+        entries[1].insert(0, "1000000")
+        buttons["保存"].invoke()
+    finally:
+        if editor.winfo_exists():
+            editor.destroy()
+
+    stored = core.load_custom()["providers"]["newapi"]["models"][0]
+    assert stored["contextWindow"] == 1000000
+    assert app.model_tree.set(app.model_tree.get_children()[0], "context") == "1.0M"
+
+
+def test_model_editor_rejects_bad_numbers_without_writing(app, monkeypatch):
+    errors = []
+    monkeypatch.setattr(piswitch.messagebox, "showerror", lambda t, m, **k: errors.append(m))
+    app.refresh_providers(select="newapi")
+    app.model_tree.selection_set(app.model_tree.get_children()[0])
+    app.edit_model()
+    editor = app._model_editor
+    try:
+        entries = [w for w in _all_widgets(editor) if w.winfo_class() == "TEntry"]
+        entries[1].delete(0, "end")
+        entries[1].insert(0, "not-a-number")
+        _buttons(editor)["保存"].invoke()
+        assert errors and "整数" in errors[0]
+        assert editor.winfo_exists(), "dialog should stay open on invalid input"
+    finally:
+        if editor.winfo_exists():
+            editor.destroy()
+    assert "contextWindow" not in core.load_custom()["providers"]["newapi"]["models"][0]
+
+
+def test_model_editor_refuses_builtin_providers(app, monkeypatch):
+    infos = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: infos.append(m))
+    app.refresh_providers(select="deepseek")
+    app.model_tree.selection_set(app.model_tree.get_children()[0])
+
+    app.edit_model()
+
+    assert infos and "内置" in infos[0]
+
+
+def test_imported_models_inherit_builtin_metadata(app, monkeypatch):
+    """A gateway reselling a builtin model id should not get placeholder numbers."""
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+    app.refresh_providers(select="newapi")
+    # nvidia (builtin) ships z-ai/glm-5.2 with reasoning=True in the fixture store
+    app._show_remote_models([{"id": "z-ai/glm-5.2", "name": "GLM"}], "newapi")
+    dialog = _toplevels(app)[0]
+    try:
+        tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+        tree.selection_set("0")
+        app._show_remote_selected = None
+        _buttons(dialog)["全选"].invoke()
+        _buttons(dialog)["导入所选"].invoke()
+    finally:
+        if dialog.winfo_exists():
+            dialog.destroy()
+
+    imported = next(m for m in core.load_custom()["providers"]["newapi"]["models"]
+                    if m["id"] == "z-ai/glm-5.2")
+    assert imported["reasoning"] is True  # inherited from the builtin store, not defaulted
+
+
