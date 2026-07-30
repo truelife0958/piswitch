@@ -486,6 +486,7 @@ def fetch_remote_models(
     *,
     timeout: float = 20,
     opener=None,
+    environ: dict[str, str] | None = None,
 ) -> list[dict]:
     url = fetch_models_url(base_url)
     parsed_url = urlsplit(url)
@@ -496,7 +497,7 @@ def fetch_remote_models(
         "Accept": "application/json",
         "User-Agent": HTTP_USER_AGENT,
     })
-    token = resolve_api_key_value(api_key)
+    token = resolve_api_key_value(api_key, environ)
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -542,12 +543,147 @@ def fetch_remote_models(
     return models
 
 
+ANTHROPIC_VERSION = "2023-06-01"
+PROBE_PROMPT = "hi"
+# api types whose chat endpoint piswitch can reach with only baseUrl + a bearer-ish key.
+# vertex / bedrock / azure need service-account JSON, SigV4 signing, or a deployment name —
+# none of which the provider form collects, so they keep the /v1/models probe instead.
+CHAT_PROBE_APIS = (
+    "openai-completions",
+    "openai-responses",
+    "anthropic-messages",
+    "google-generative-ai",
+)
 
 
+def supports_chat_probe(api: str) -> bool:
+    return api in CHAT_PROBE_APIS
 
 
+def _v1_root(base: str) -> str:
+    """Normalise a stored baseUrl to its `/v1` root.
+
+    baseUrl is saved with or without the `/v1` suffix (fetch_models_url tolerates both),
+    so endpoint composition has to tolerate both too.
+    """
+    root = (base or "").rstrip("/")
+    if root.endswith("/models"):
+        root = root[: -len("/models")]
+    root = root.rstrip("/")
+    if not root.endswith("/v1"):
+        root += "/v1"
+    return root
 
 
+def build_chat_probe(api: str, base_url: str, model_id: str, token: str) -> tuple[str, dict, dict]:
+    """Compose the (url, headers, body) of a minimal real completion request."""
+    if not supports_chat_probe(api):
+        raise ValueError(f'"{api}" 不支持对话探测，仅能测试模型列表接口')
+    if not (isinstance(model_id, str) and model_id.strip()):
+        raise ValueError("chat probe requires a model id")
+    model_id = model_id.strip()
+    headers = {"Accept": "application/json", "Content-Type": "application/json",
+               "User-Agent": HTTP_USER_AGENT}
+
+    if api == "anthropic-messages":
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+        if token:
+            headers["x-api-key"] = token
+        return (f"{_v1_root(base_url)}/messages", headers, {
+            "model": model_id,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
+        })
+
+    if api == "google-generative-ai":
+        # Key travels as a header, not ?key=, so it cannot leak through URL logging.
+        if token:
+            headers["x-goog-api-key"] = token
+        root = (base_url or "").rstrip("/")
+        for suffix in ("/v1beta", "/v1"):
+            if root.endswith(suffix):
+                root = root[: -len(suffix)]
+                break
+        return (f"{root.rstrip('/')}/v1beta/models/{model_id}:generateContent", headers, {
+            "contents": [{"parts": [{"text": PROBE_PROMPT}]}],
+            "generationConfig": {"maxOutputTokens": 1},
+        })
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if api == "openai-responses":
+        return (f"{_v1_root(base_url)}/responses", headers, {
+            "model": model_id,
+            "input": PROBE_PROMPT,
+            # OpenAI rejects max_output_tokens below 16, so 1 is not an option here.
+            "max_output_tokens": 16,
+        })
+    return (f"{_v1_root(base_url)}/chat/completions", headers, {
+        "model": model_id,
+        "messages": [{"role": "user", "content": PROBE_PROMPT}],
+        "max_tokens": 1,
+        "stream": False,
+    })
+
+
+def probe_chat(
+    base_url: str,
+    api: str,
+    model_id: str,
+    api_key: str,
+    *,
+    timeout: float = 20,
+    opener=None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    """Send one minimal real completion. Returns a short detail; raises ValueError.
+
+    `/v1/models` frequently succeeds against a proxy that then rejects real completions —
+    that gap is the reason backfill_proxy_compat exists. Only an actual completion closes it.
+    """
+    token = resolve_api_key_value(api_key, environ)
+    url, headers, body = build_chat_probe(api, base_url, model_id, token)
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base URL must be a valid http:// or https:// URL")
+
+    request = Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+    try:
+        with (opener or urlopen)(request, timeout=timeout) as response:
+            response.read()
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ValueError(f"authentication failed (HTTP {exc.code})") from exc
+        # The error body names the rejected parameter; without it a 400 is undiagnosable.
+        raise ValueError(f"HTTP {exc.code}: {_error_snippet(exc)}") from exc
+    except URLError as exc:
+        raise ValueError(f"cannot connect to chat endpoint: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise ValueError("chat request timed out") from exc
+    return f"{api} 对话正常"
+
+
+def _error_snippet(exc: HTTPError, limit: int = 200) -> str:
+    """The upstream error message, trimmed. Best-effort: never raises."""
+    try:
+        raw = exc.read().decode("utf-8", "replace").strip()
+    except Exception:  # noqa: BLE001 - a body we cannot read must not mask the HTTP error
+        return exc.reason or ""
+    if not raw:
+        return exc.reason or ""
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw[:limit]
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"][:limit]
+        if isinstance(error, str):
+            return error[:limit]
+        if isinstance(parsed.get("message"), str):
+            return parsed["message"][:limit]
+    return raw[:limit]
 
 
 

@@ -275,6 +275,63 @@ def test_context_window_column_is_populated(app):
 
 
 
+# --- ③ deep connection test ------------------------------------------------
+
+def test_test_connection_also_sends_a_real_completion(app, monkeypatch):
+    app.refresh_providers(select="newapi")
+    monkeypatch.setattr(core, "fetch_remote_models",
+                        lambda *a, **k: [{"id": "gpt-4o", "name": "gpt-4o"}])
+    chatted = {}
+
+    def fake_probe(base_url, api, model_id, api_key, **kwargs):
+        chatted["model"] = model_id
+        chatted["api"] = api
+        return "ok"
+
+    monkeypatch.setattr(core, "probe_chat", fake_probe)
+    infos = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: infos.append(m))
+
+    app.test_connection()
+    _drain(app)
+
+    assert chatted["model"] == "gpt-4o"
+    assert chatted["api"] == "openai-completions"
+    assert infos and "对话正常" in infos[0]
+
+
+def test_test_connection_warns_when_listing_passes_but_chat_fails(app, monkeypatch):
+    """The exact failure the probe exists for: proxy lists models, rejects completions."""
+    app.refresh_providers(select="newapi")
+    monkeypatch.setattr(core, "fetch_remote_models",
+                        lambda *a, **k: [{"id": "gpt-4o", "name": "gpt-4o"}])
+
+    def rejecting(*_a, **_k):
+        raise ValueError("HTTP 400: Unsupported parameter: prompt_cache_key")
+
+    monkeypatch.setattr(core, "probe_chat", rejecting)
+    warnings = []
+    monkeypatch.setattr(piswitch.messagebox, "showwarning", lambda t, m, **k: warnings.append(m))
+
+    app.test_connection()
+    _drain(app)
+
+    assert warnings and "prompt_cache_key" in warnings[0]
+    assert "对话失败" in app.status_var.get()
+
+
+def test_test_connection_skips_chat_probe_for_unsupported_api(app, monkeypatch):
+    app.refresh_providers(select="newapi")
+    app.api_var.set("bedrock-converse-stream")
+    monkeypatch.setattr(core, "fetch_remote_models", lambda *a, **k: [{"id": "m", "name": "m"}])
+    monkeypatch.setattr(core, "probe_chat", lambda *a, **k: pytest.fail("must not chat-probe"))
+    infos = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: infos.append(m))
+
+    app.test_connection()
+    _drain(app)
+
+    assert infos and "不支持对话探测" in infos[0]
 
 
 # --- ② model metadata editor -----------------------------------------------

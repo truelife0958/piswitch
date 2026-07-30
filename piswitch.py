@@ -586,13 +586,54 @@ class App(tk.Tk):
         api_key = self.api_key_var.get()
         return lambda: core.fetch_remote_models(base_url, api_key, timeout=20)
 
+    def _selected_model_id(self) -> str:
+        selection = self.model_tree.selection() or (
+            (self.model_tree.focus(),) if self.model_tree.focus() else ()
+        )
+        if selection:
+            return self.model_tree.set(selection[0], "id")
+        rows = self.model_tree.get_children()
+        return self.model_tree.set(rows[0], "id") if rows else ""
 
     def test_connection(self) -> None:
-        def success(models: list[dict]) -> None:
-            self.status_var.set(f"连接成功，发现 {len(models)} 个模型")
-            messagebox.showinfo("连接成功", f"模型接口可用，共发现 {len(models)} 个模型。")
+        """List models, then send one real 1-token completion.
 
-        self._run_network("正在测试模型接口…", self._fetch_action_from_form(), success)
+        A proxy that answers /v1/models can still reject real completions — that gap is
+        why backfill_proxy_compat exists, and listing alone never revealed it.
+        """
+        base_url = self.base_url_var.get()
+        api_key = self.api_key_var.get()
+        api = self.api_var.get()
+        preferred = self._selected_model_id()
+
+        def action():
+            models = core.fetch_remote_models(base_url, api_key, timeout=20)
+            if not core.supports_chat_probe(api):
+                return (models, None, f"{api} 不支持对话探测，仅验证了模型接口。")
+            probe_model = preferred or (models[0]["id"] if models else "")
+            if not probe_model:
+                return (models, None, "接口未返回模型，无法进行对话探测。")
+            try:
+                core.probe_chat(base_url, api, probe_model, api_key, timeout=20)
+            except ValueError as exc:
+                return (models, False, f"对话失败（{probe_model}）：{exc}")
+            return (models, True, f"对话正常（{probe_model}）。")
+
+        def success(result) -> None:
+            models, chat_ok, note = result
+            if chat_ok is False:
+                self.status_var.set("模型接口可用，但对话失败")
+                messagebox.showwarning(
+                    "对话测试失败",
+                    f"模型接口可用，共 {len(models)} 个模型。\n\n{note}",
+                )
+                return
+            self.status_var.set(f"连接成功，发现 {len(models)} 个模型")
+            messagebox.showinfo("连接成功", f"共发现 {len(models)} 个模型。\n{note}")
+
+        self._run_network("正在测试模型接口与对话…", action, success)
+
+
 
     def fetch_models(self) -> None:
         if not self.current_provider:
