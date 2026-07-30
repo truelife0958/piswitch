@@ -1,6 +1,8 @@
 """Pre-mutation snapshots and restore."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from pathlib import Path
 import shutil
 
@@ -57,3 +59,13 @@ def restore_switch_backup(backup: Path, *, ts: str) -> list[str]:
     light_backup(ts)
     write_json_bundle([(targets[name], data) for name, data in snapshot.items()])
     return list(snapshot)
+
+
+def mutation_timestamp() -> str:
+    """Timestamp for a backup directory name.
+
+    Microseconds included so two mutations inside the same second cannot collide on one
+    snapshot directory. Lives here rather than in the GUI so both the window and the
+    dialogs can reach it without importing each other.
+    """
+    return datetime.now().strftime("%Y%m%d-%H%M%S-%f")

@@ -8,24 +8,15 @@ import queue
 import sys
 import threading
 import tkinter as tk
-from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 import core
+import dialogs
+import layout
+from core import mutation_timestamp
 
 
-API_TYPES = (
-    "openai-completions",
-    "openai-responses",
-    "anthropic-messages",
-    "google-generative-ai",
-    "mistral-conversations",
-    "google-vertex",
-    "azure-openai-responses",
-    "openai-codex-responses",
-    "bedrock-converse-stream",
-)
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "piswitch.png"
 OAUTH_LABELS = {"logged_in": "(OAuth，已登录)", "expired": "(OAuth，已过期)"}
 # Batch health checks run concurrently but stay modest: these are third-party gateways,
@@ -33,9 +24,6 @@ OAUTH_LABELS = {"logged_in": "(OAuth，已登录)", "expired": "(OAuth，已过�
 HEALTH_CHECK_WORKERS = 6
 HEALTH_CHECK_TIMEOUT = 10
 
-
-def mutation_timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S-%f")
 
 
 class App(tk.Tk):
@@ -66,7 +54,7 @@ class App(tk.Tk):
         self.provider_var = tk.StringVar()
         self.name_var = tk.StringVar()
         self.base_url_var = tk.StringVar(value="https://")
-        self.api_var = tk.StringVar(value=API_TYPES[0])
+        self.api_var = tk.StringVar(value=core.API_TYPES[0])
         self.api_key_var = tk.StringVar()
         self.key_status_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)
@@ -86,147 +74,7 @@ class App(tk.Tk):
         self.refresh_providers()
 
     def _build_ui(self) -> None:
-        toolbar = ttk.Frame(self, padding=(10, 8))
-        toolbar.pack(fill="x")
-        ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
-        ttk.Button(toolbar, text="新增", command=self.new_provider).pack(side="right", padx=(6, 0))
-        ttk.Checkbutton(toolbar, text="显示隐藏", variable=self.show_hidden, command=self.refresh_providers).pack(side="right", padx=(6, 0))
-        ttk.Button(toolbar, text="刷新", command=self.refresh_providers).pack(side="right")
-        self.check_all_button = ttk.Button(toolbar, text="检查全部", command=self.check_all_providers)
-        self.check_all_button.pack(side="right", padx=6)
-        ttk.Button(toolbar, text="恢复备份", command=self.open_backup_restore).pack(side="right", padx=6)
-        ttk.Button(toolbar, text="导入", command=self.import_config).pack(side="right")
-        ttk.Button(toolbar, text="导出", command=self.export_config).pack(side="right", padx=6)
-
-        pane = ttk.PanedWindow(self, orient="horizontal")
-        pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
-
-        left = ttk.Frame(pane, padding=(0, 4, 8, 4))
-        right = ttk.Frame(pane, padding=(8, 4, 0, 4))
-        pane.add(left, weight=2)
-        pane.add(right, weight=3)
-
-        self.provider_tree = ttk.Treeview(
-            left,
-            columns=("provider", "name", "models", "auth", "health"),
-            show="headings",
-            selectmode="browse",
-        )
-        headings = (
-            ("provider", "Provider ID", 120),
-            ("name", "名称", 105),
-            ("models", "模型", 42),
-            ("auth", "验证", 66),
-            ("health", "状态", 78),
-        )
-        for column, title, width in headings:
-            self.provider_tree.heading(column, text=title)
-            self.provider_tree.column(column, width=width, minwidth=40, anchor="w")
-        provider_scroll = ttk.Scrollbar(left, orient="vertical", command=self.provider_tree.yview)
-        self.provider_tree.configure(yscrollcommand=provider_scroll.set)
-        self.provider_tree.pack(side="left", fill="both", expand=True)
-        provider_scroll.pack(side="right", fill="y")
-        self.provider_tree.bind("<<TreeviewSelect>>", self._on_provider_selected)
-
-        form = ttk.Frame(right)
-        form.pack(fill="x")
-        form.columnconfigure(1, weight=1)
-        fields = (
-            ("Provider ID", self.provider_var),
-            ("显示名称", self.name_var),
-            ("Base URL", self.base_url_var),
-        )
-        for row, (label, variable) in enumerate(fields):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=5)
-            entry = ttk.Entry(form, textvariable=variable)
-            entry.grid(row=row, column=1, columnspan=2, sticky="ew", pady=5)
-            if row == 0:
-                self.provider_entry = entry
-
-        ttk.Label(form, text="API 类型").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=5)
-        ttk.Combobox(form, textvariable=self.api_var, values=API_TYPES, state="readonly").grid(
-            row=3, column=1, columnspan=2, sticky="ew", pady=5
-        )
-
-        ttk.Label(form, text="API Key").grid(row=4, column=0, sticky="w", padx=(0, 10), pady=5)
-        self.api_key_entry = ttk.Entry(form, textvariable=self.api_key_var, show="*")
-        self.api_key_entry.grid(row=4, column=1, sticky="ew", pady=5)
-        ttk.Checkbutton(
-            form,
-            text="显示",
-            variable=self.show_key_var,
-            command=self._toggle_key_visibility,
-        ).grid(row=4, column=2, sticky="e", padx=(8, 0))
-        self.key_status_label = ttk.Label(form, textvariable=self.key_status_var, anchor="w")
-        self.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 2))
-
-        actions = ttk.Frame(right)
-        actions.pack(fill="x", pady=(10, 14))
-        self.save_provider_button = ttk.Button(actions, text="保存供应商", command=self.save_provider)
-        self.save_provider_button.pack(side="left")
-        self.test_connection_button = ttk.Button(actions, text="测试连接", command=self.test_connection)
-        self.test_connection_button.pack(side="left", padx=(8, 0))
-        self.delete_provider_button = ttk.Button(actions, text="删除供应商", command=self.delete_provider)
-        self.delete_provider_button.pack(side="left", padx=8)
-        self.logout_provider_button = ttk.Button(actions, text="退出登录", command=self.logout_provider)
-        self.logout_provider_button.pack(side="left", padx=8)
-        self.hide_builtin_button = ttk.Button(actions, text="从列表移除", command=self.toggle_hide_builtin)
-        self.hide_builtin_button.pack(side="left", padx=8)
-        self._action_buttons = {
-            "save": self.save_provider_button,
-            "test": self.test_connection_button,
-            "delete_provider": self.delete_provider_button,
-            "logout": self.logout_provider_button,
-            "hide_builtin": self.hide_builtin_button,
-        }
-
-        model_header = ttk.Frame(right)
-        model_header.pack(fill="x", pady=(2, 6))
-        ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
-        self.set_default_button = ttk.Button(model_header, text="设为默认", command=self.set_default)
-        self.set_default_button.pack(side="left", padx=(10, 0))
-        self.clear_models_button = ttk.Button(model_header, text="清空", command=self.clear_models)
-        self.clear_models_button.pack(side="right")
-        self.delete_model_button = ttk.Button(model_header, text="删除模型", command=self.delete_model)
-        self.delete_model_button.pack(side="right", padx=6)
-        self.add_model_button = ttk.Button(model_header, text="增加模型", command=self.add_models)
-        self.add_model_button.pack(side="right", padx=6)
-        self.fetch_model_button = ttk.Button(model_header, text="拉取模型", command=self.fetch_models)
-        self.fetch_model_button.pack(side="right")
-        self._action_buttons.update({
-            "add_model": self.add_model_button,
-            "delete_model": self.delete_model_button,
-            "clear_models": self.clear_models_button,
-            "fetch_models": self.fetch_model_button,
-            "set_default": self.set_default_button,
-        })
-
-        model_area = ttk.Frame(right)
-        model_area.pack(fill="both", expand=True)
-        self.model_tree = ttk.Treeview(
-            model_area,
-            columns=("default", "id", "name", "context", "reasoning"),
-            show="headings",
-            selectmode="extended",
-        )
-        for column, title, width in (
-            ("default", "默认", 42),
-            ("id", "Model ID", 196),
-            ("name", "名称", 124),
-            ("context", "上下文", 72),
-            ("reasoning", "推理", 46),
-        ):
-            self.model_tree.heading(column, text=title)
-            self.model_tree.column(column, width=width, minwidth=40, anchor="w")
-        self.model_tree.column("default", anchor="center", stretch=False)
-        model_scroll = ttk.Scrollbar(model_area, orient="vertical", command=self.model_tree.yview)
-        self.model_tree.configure(yscrollcommand=model_scroll.set)
-        self.model_tree.pack(side="left", fill="both", expand=True)
-        model_scroll.pack(side="right", fill="y")
-        # Double-click a model row to point pi at it.
-        self.model_tree.bind("<Double-Button-1>", self._on_model_double_click)
-
-        ttk.Label(self, textvariable=self.status_var, anchor="w", relief="sunken", padding=(8, 4)).pack(fill="x")
+        layout.build(self)
 
     def _toggle_key_visibility(self) -> None:
         self.api_key_entry.configure(show="" if self.show_key_var.get() else "*")
@@ -347,7 +195,7 @@ class App(tk.Tk):
         self.provider_var.set(provider)
         self.name_var.set(config.get("name") or provider)
         self.base_url_var.set(config.get("baseUrl", ""))
-        self.api_var.set(config.get("api", API_TYPES[0]))
+        self.api_var.set(config.get("api", core.API_TYPES[0]))
         if kind == "oauth":
             # OAuth access tokens are extension-managed; show read-only status instead.
             self.api_key_var.set(OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)"))
@@ -435,58 +283,7 @@ class App(tk.Tk):
         self._open_model_editor(provider, model)
 
     def _open_model_editor(self, provider: str, model: dict) -> None:
-        win = tk.Toplevel(self)
-        win.title(f"编辑模型 {model['id']}")
-        win.transient(self)
-        body = ttk.Frame(win, padding=(12, 12, 12, 6))
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(1, weight=1)
-
-        cost = model.get("cost") if isinstance(model.get("cost"), dict) else {}
-
-        def text_of(value) -> str:
-            return "" if value in (None, "") else str(value)
-
-        fields = (
-            ("名称", "name", tk.StringVar(value=text_of(model.get("name") or model["id"]))),
-            ("上下文窗口", "contextWindow", tk.StringVar(value=text_of(model.get("contextWindow")))),
-            ("最大输出 tokens", "maxTokens", tk.StringVar(value=text_of(model.get("maxTokens")))),
-            ("输入价格 /百万", "costInput", tk.StringVar(value=text_of(cost.get("input", 0)))),
-            ("输出价格 /百万", "costOutput", tk.StringVar(value=text_of(cost.get("output", 0)))),
-        )
-        for index, (label, _key, variable) in enumerate(fields):
-            ttk.Label(body, text=label).grid(row=index, column=0, sticky="w", padx=(0, 10), pady=4)
-            ttk.Entry(body, textvariable=variable, width=26).grid(
-                row=index, column=1, sticky="ew", pady=4
-            )
-        reasoning_var = tk.BooleanVar(value=bool(model.get("reasoning")))
-        ttk.Checkbutton(body, text="支持推理 (reasoning)", variable=reasoning_var).grid(
-            row=len(fields), column=1, sticky="w", pady=(6, 0)
-        )
-        ttk.Label(body, text="留空表示未知，不会写成 0。").grid(
-            row=len(fields) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0)
-        )
-        self._model_editor = win  # let tests reach the open dialog
-
-        def save() -> None:
-            raw = {key: variable.get() for _label, key, variable in fields}
-            raw["reasoning"] = reasoning_var.get()
-            try:
-                changes = core.parse_model_edits(raw, existing=model)
-                core.update_provider_model(
-                    provider, model["id"], changes, ts=mutation_timestamp()
-                )
-            except (OSError, ValueError) as exc:
-                messagebox.showerror("保存失败", str(exc), parent=win)
-                return
-            win.destroy()
-            self.refresh_providers(select=provider)
-            self.status_var.set(f"已更新模型 {model['id']}")
-
-        buttons = ttk.Frame(win, padding=(12, 0, 12, 12))
-        buttons.pack(fill="x")
-        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
-        ttk.Button(buttons, text="保存", command=save).pack(side="right", padx=8)
+        dialogs.open_model_editor(self, provider, model)
 
     def set_default(self) -> None:
         """Point pi at the selected model. This is what the tool is named after."""
@@ -528,7 +325,7 @@ class App(tk.Tk):
         self.provider_var.set("")
         self.name_var.set("")
         self.base_url_var.set("https://")
-        self.api_var.set(API_TYPES[0])
+        self.api_var.set(core.API_TYPES[0])
         self.api_key_var.set("")
         self.model_tree.delete(*self.model_tree.get_children())
         self._apply_action_states()  # new-provider mode: save/test on, per-provider actions off
@@ -715,148 +512,7 @@ class App(tk.Tk):
         )
 
     def _show_remote_models(self, models: list[dict], provider: str) -> None:
-        if not models:
-            self.status_var.set("连接成功，但接口没有返回模型")
-            messagebox.showinfo("拉取模型", "接口返回了空模型列表。")
-            return
-        self.status_var.set(f"已拉取 {len(models)} 个模型")
-        win = tk.Toplevel(self)
-        win.title("选择要导入的模型")
-        win.geometry("620x440")
-        win.transient(self)
-
-        selected: set[str] = set()
-        selection_text = tk.StringVar(value=f"发现 {len(models)} 个模型，已选择 0 个")
-        ttk.Label(win, textvariable=selection_text, padding=(10, 10, 10, 6)).pack(anchor="w")
-        ttk.Label(win, text="提示：单击或空格切换单行勾选；Shift+单击框选一片。", padding=(10, 0, 10, 4)).pack(anchor="w")
-        area = ttk.Frame(win, padding=(10, 0, 10, 8))
-        area.pack(fill="both", expand=True)
-        tree = ttk.Treeview(
-            area,
-            columns=("selected", "id", "name"),
-            show="headings",
-            selectmode="browse",
-        )
-        tree.heading("selected", text="选择")
-        tree.heading("id", text="Model ID")
-        tree.heading("name", text="名称")
-        tree.column("selected", width=52, minwidth=52, stretch=False, anchor="center")
-        tree.column("id", width=310, anchor="w")
-        tree.column("name", width=205, anchor="w")
-        scroll = ttk.Scrollbar(area, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        for index, model in enumerate(models):
-            tree.insert("", "end", iid=str(index), values=("☐", model["id"], model["name"]))
-
-        def update_selection_text() -> None:
-            selection_text.set(f"发现 {len(models)} 个模型，已选择 {len(selected)} 个")
-
-        def set_checked(item: str, checked: bool) -> None:
-            values = list(tree.item(item, "values"))
-            values[0] = "☑" if checked else "☐"
-            tree.item(item, values=values)
-            if checked:
-                selected.add(item)
-            else:
-                selected.discard(item)
-
-        last_clicked = {"iid": None}  # anchor for shift-click range toggle
-
-        def toggle_item(item: str) -> None:
-            set_checked(item, item not in selected)
-            tree.focus_set()
-            tree.focus(item)
-            tree.selection_set(item)
-            update_selection_text()
-
-        def on_tree_click(event) -> str | None:
-            item = tree.identify_row(event.y)
-            if not item or tree.identify_region(event.x, event.y) not in {"cell", "tree"}:
-                return None
-            # Shift+click = marquee toggle over the range from the anchor to this row,
-            # unifying the whole span to whatever state this click produces.
-            if event.state & 0x0001 and last_clicked["iid"] is not None:
-                iids = tree.get_children()
-                for row_iid, target in core.range_toggle_targets(
-                    iids, last_clicked["iid"], item, lambda i: i in selected
-                ):
-                    set_checked(row_iid, target)
-                last_clicked["iid"] = item
-                tree.focus_set()
-                tree.focus(item)
-                tree.selection_set(item)
-                update_selection_text()
-                return "break"
-            toggle_item(item)
-            last_clicked["iid"] = item
-            return "break"
-
-        def on_tree_space(_event) -> str:
-            item = tree.focus()
-            if item:
-                toggle_item(item)
-            return "break"
-
-        def select_all() -> None:
-            for item in tree.get_children():
-                set_checked(item, True)
-            update_selection_text()
-
-        def clear_selection() -> None:
-            for item in tree.get_children():
-                set_checked(item, False)
-            tree.selection_remove(*tree.selection())
-            update_selection_text()
-
-        tree.bind("<Button-1>", on_tree_click)
-        tree.bind("<space>", on_tree_space)
-
-        def import_selected() -> None:
-            selected_ids = [
-                tree.item(item, "values")[1]
-                for item in tree.get_children()
-                if item in selected
-            ]
-            if not selected_ids:
-                messagebox.showinfo("导入模型", "请至少选择一个模型。", parent=win)
-                return
-            if provider not in core.load_custom()["providers"]:
-                messagebox.showerror("导入失败", f"供应商 {provider} 已不存在", parent=win)
-                win.destroy()
-                return
-            try:
-                # Prefer real metadata: whatever the gateway reported, overridden by
-                # pi's own numbers when a builtin ships the same model id.
-                store = core.load_models_store()
-                wanted = set(selected_ids)
-                metadata = {}
-                for model in models:
-                    model_id = model.get("id")
-                    if model_id not in wanted:
-                        continue
-                    merged = dict(model.get("meta") or {})
-                    merged.update(core.builtin_model_metadata(model_id, store))
-                    if merged:
-                        metadata[model_id] = merged
-                core.add_provider_models(
-                    provider, ",".join(selected_ids),
-                    ts=mutation_timestamp(), metadata=metadata,
-                )
-            except (OSError, ValueError) as exc:
-                messagebox.showerror("导入失败", str(exc), parent=win)
-                return
-            win.destroy()
-            self.refresh_providers(select=provider)
-            self.status_var.set(f"已导入 {len(selected_ids)} 个模型")
-
-        buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
-        buttons.pack(fill="x")
-        ttk.Button(buttons, text="全选", command=select_all).pack(side="left")
-        ttk.Button(buttons, text="清空", command=clear_selection).pack(side="left", padx=6)
-        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
-        ttk.Button(buttons, text="导入所选", command=import_selected).pack(side="right", padx=8)
+        dialogs.show_remote_models(self, models, provider)
 
     def delete_provider(self) -> None:
         provider = self.current_provider
@@ -1037,146 +693,13 @@ class App(tk.Tk):
         self.status_var.set(f"已清空 {removed} 个模型")
 
     def export_config(self) -> None:
-        """Write the provider bundle to a file. core.export_providers removes secrets."""
-        payload = core.export_providers()
-        if not payload["providers"]:
-            messagebox.showinfo("导出配置", "没有可导出的自定义供应商。")
-            return
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="导出供应商配置",
-            defaultextension=".json",
-            initialfile=f"piswitch-providers-{datetime.now().strftime('%Y%m%d')}.json",
-            filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            core.write_json_atomic(Path(path), payload)
-        except OSError as exc:
-            messagebox.showerror("导出失败", str(exc))
-            return
-        count = len(payload["providers"])
-        self.status_var.set(f"已导出 {count} 个供应商 → {Path(path).name}")
-        messagebox.showinfo(
-            "导出完成",
-            f"已导出 {count} 个供应商。\n\n"
-            "文件不含 API Key。$ENV_VAR 形式的引用会保留，\n"
-            "导入方需自行设置对应的环境变量。",
-        )
+        dialogs.export_config(self)
 
     def import_config(self) -> None:
-        path = filedialog.askopenfilename(
-            parent=self,
-            title="导入供应商配置",
-            filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            payload = core.read_json(Path(path), None)
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("导入失败", str(exc))
-            return
-        incoming = payload.get("providers") if isinstance(payload, dict) else None
-        if not isinstance(incoming, dict) or not incoming:
-            messagebox.showerror("导入失败", "导入文件不包含任何供应商")
-            return
-
-        existing = set(core.load_custom()["providers"])
-        clashes = sorted(name for name in incoming if name in existing)
-        prompt = f"将导入 {len(incoming)} 个供应商。\n\n"
-        overwrite = False
-        if clashes:
-            prompt += (
-                f"其中 {len(clashes)} 个已存在：\n"
-                + "\n".join(clashes[:8])
-                + (f"\n… 共 {len(clashes)} 个\n\n" if len(clashes) > 8 else "\n\n")
-                + "点“是”覆盖它们，点“否”只导入新的供应商。"
-            )
-            answer = messagebox.askyesnocancel("导入配置", prompt)
-            if answer is None:
-                return
-            overwrite = bool(answer)
-        else:
-            prompt += "继续？"
-            if not messagebox.askyesno("导入配置", prompt):
-                return
-
-        try:
-            result = core.import_providers(
-                payload, ts=mutation_timestamp(), overwrite=overwrite
-            )
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("导入失败", str(exc))
-            return
-
-        self.current_provider = None
-        self.refresh_providers()
-        summary = (
-            f"新增 {len(result['added'])} 个，"
-            f"覆盖 {len(result['overwritten'])} 个，"
-            f"跳过 {len(result['skipped'])} 个"
-        )
-        self.status_var.set(f"导入完成：{summary}")
-        detail = summary
-        if result["invalid"]:
-            detail += f"\n\n以下条目格式无效，已忽略：\n" + "\n".join(result["invalid"][:8])
-        messagebox.showinfo("导入完成", detail)
+        dialogs.import_config(self)
 
     def open_backup_restore(self) -> None:
-        backups = core.list_switch_backups()
-        if not backups:
-            messagebox.showinfo("恢复备份", "目前没有可恢复的备份。")
-            return
-        win = tk.Toplevel(self)
-        win.title("恢复配置备份")
-        win.geometry("660x400")
-        win.transient(self)
-
-        ttk.Label(
-            win,
-            text="选择一个修改前快照。恢复前会再次备份当前配置。",
-            padding=(10, 10, 10, 6),
-        ).pack(anchor="w")
-        area = ttk.Frame(win, padding=(10, 0, 10, 8))
-        area.pack(fill="both", expand=True)
-        tree = ttk.Treeview(area, columns=("time", "files"), show="headings", selectmode="browse")
-        tree.heading("time", text="备份时间")
-        tree.heading("files", text="包含文件")
-        tree.column("time", width=230, anchor="w")
-        tree.column("files", width=360, anchor="w")
-        scroll = ttk.Scrollbar(area, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        for index, backup in enumerate(backups):
-            names = ", ".join(sorted(path.name for path in backup.glob("*.json")))
-            tree.insert("", "end", iid=str(index), values=(backup.name.removeprefix("switch-"), names))
-        tree.selection_set("0")
-
-        def restore_selected() -> None:
-            selection = tree.selection()
-            if not selection:
-                return
-            backup = backups[int(selection[0])]
-            if not messagebox.askyesno("确认恢复", f"恢复备份 {backup.name}？", parent=win):
-                return
-            try:
-                restored = core.restore_switch_backup(backup, ts=mutation_timestamp())
-            except (OSError, ValueError) as exc:
-                messagebox.showerror("恢复失败", str(exc), parent=win)
-                return
-            win.destroy()
-            self.current_provider = None
-            self.refresh_providers()
-            self.status_var.set(f"已恢复 {len(restored)} 个配置文件")
-            messagebox.showinfo("恢复完成", "配置已恢复，恢复前状态也已自动备份。")
-
-        buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
-        buttons.pack(fill="x")
-        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
-        ttk.Button(buttons, text="恢复所选", command=restore_selected).pack(side="right", padx=8)
+        dialogs.open_backup_restore(self)
 
 
 def main() -> None:

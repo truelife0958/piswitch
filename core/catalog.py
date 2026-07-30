@@ -46,6 +46,18 @@ def model_supports_reasoning(store: dict, custom: dict, provider: str, model_id)
     return False
 
 
+# The `api` values pi accepts on a provider. supports_chat_probe keys off these.
+API_TYPES = (
+    "openai-completions",
+    "openai-responses",
+    "anthropic-messages",
+    "google-generative-ai",
+    "mistral-conversations",
+    "google-vertex",
+    "azure-openai-responses",
+    "openai-codex-responses",
+    "bedrock-converse-stream",
+)
 DEFAULT_INPUT_TYPES = ["text", "image"]
 
 

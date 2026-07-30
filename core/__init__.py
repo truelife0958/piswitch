@@ -35,6 +35,7 @@ from .store import (
     write_json_bundle,
 )
 from .backups import (
+    mutation_timestamp,
     BACKUP_RETENTION,
     light_backup,
     list_switch_backups,
@@ -50,6 +51,7 @@ from .auth import (
     resolve_has_key,
 )
 from .catalog import (
+    API_TYPES,
     DEFAULT_INPUT_TYPES,
     MODEL_METADATA_KEYS,
     build_custom_provider_cfg,
@@ -125,6 +127,8 @@ from .cli import (
 from .paths import _now_ms  # noqa: F401  (tests monkeypatch the clock)
 
 __all__ = [
+    "API_TYPES",
+    "mutation_timestamp",
     "ACTION_KEYS",
     "ANTHROPIC_VERSION",
     "BACKUP_RETENTION",
