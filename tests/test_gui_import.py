@@ -31,6 +31,5 @@ def test_gui_uses_core_dispatch(monkeypatch):
 
 
 def test_mutation_timestamp_is_path_safe():
-    mod = importlib.import_module("piswitch")
-    timestamp = mod.mutation_timestamp()
+    timestamp = core.mutation_timestamp()
     assert re.fullmatch(r"\d{8}-\d{6}-\d{6}", timestamp)

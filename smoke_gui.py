@@ -16,6 +16,7 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+from tkinter import simpledialog
 
 REPO = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO))
@@ -65,7 +66,7 @@ def _stub_modals(piswitch) -> list[str]:
     piswitch.messagebox.showerror = record("error")
     piswitch.messagebox.showwarning = record("warning")
     piswitch.messagebox.askyesno = record("askyesno", default=False)
-    piswitch.simpledialog.askstring = record("askstring", default=None)
+    simpledialog.askstring = record("askstring", default=None)
     return opened
 
 
