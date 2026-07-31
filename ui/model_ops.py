@@ -29,17 +29,21 @@ class ModelOpsMixin:
             if not core.text_matches_query(query, model.get("id"), model.get("name")):
                 continue
             is_default = self.current_provider == default_provider and model["id"] == default_model
+            tags = ["stripe"] if visible % 2 else []
+            if is_default:
+                tags.append("default")
             self.model_tree.insert(
                 "",
                 "end",
                 iid=str(index),
                 values=(
-                    "★" if is_default else "",
+                    "是" if is_default else "",
                     model["id"],
                     model.get("name", model["id"]),
                     core.format_context_window(model.get("contextWindow")),
                     "是" if model.get("reasoning") else "否",
                 ),
+                tags=tuple(tags),
             )
             visible += 1
         total = sum(
@@ -112,7 +116,7 @@ class ModelOpsMixin:
             messagebox.showerror("设为默认失败", str(exc))
             return
         self.refresh_provider_models(provider)
-        self.status_var.set(f"pi 默认模型 → {provider}/{model_id}")
+        self.status_var.set(f"pi 默认模型: {provider}/{model_id}")
 
     def add_models(self) -> None:
         provider = self.current_provider
@@ -162,7 +166,7 @@ class ModelOpsMixin:
         else:
             prompt = f"从 {provider} 删除 {count} 个模型？\n" + "\n".join(model_ids[:10])
             if len(model_ids) > 10:
-                prompt += f"\n… 共 {count} 个"
+                prompt += f"\n... 共 {count} 个"
         if default_hits:
             prompt += (
                 f"\n\n其中 {len(default_hits)} 个是 pi 当前默认模型。"

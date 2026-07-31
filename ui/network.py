@@ -7,7 +7,7 @@ import threading
 from tkinter import messagebox
 
 import core
-import dialogs
+import remote_dialog
 
 
 # Batch health checks run concurrently but stay modest: these are third-party gateways,
@@ -97,7 +97,7 @@ class NetworkMixin:
             self.status_var.set(f"连接成功，发现 {len(models)} 个模型")
             messagebox.showinfo("连接成功", f"共发现 {len(models)} 个模型。\n{note}")
 
-        self._run_network("正在测试模型接口与对话…", action, success)
+        self._run_network("正在测试模型接口与对话...", action, success)
 
     def check_all_providers(self) -> None:
         """Health-check every listed provider using the free /v1/models endpoint.
@@ -133,7 +133,11 @@ class NetworkMixin:
                     targets,
                 ))
 
-        self._run_network(f"正在检查 {len(targets)} 个供应商…", action, self._show_health_results)
+        self._run_network(
+            f"正在检查 {len(targets)} 个供应商...",
+            action,
+            self._show_health_results,
+        )
 
     def _show_health_results(self, results: list[dict]) -> None:
         ok_count = 0
@@ -141,18 +145,17 @@ class NetworkMixin:
             provider = result.get("provider")
             if result.get("ok"):
                 ok_count += 1
-                cell = f"✓ {result.get('latency_ms', 0)}ms"
+                cell = f"{result.get('latency_ms', 0)} ms"
             else:
-                cell = "✗ 失败"
+                cell = "失败"
             self._health[provider] = cell
-            if self.provider_tree.exists(provider):
-                self.provider_tree.set(provider, "health", cell)
         failed = [r for r in results if not r.get("ok")]
+        self.refresh_providers(select=self.current_provider, load_selection=False)
         self.status_var.set(f"检查完成：{ok_count} 通过，{len(failed)} 失败")
         if failed:
             lines = "\n".join(f"{r['provider']}：{r['detail']}" for r in failed[:12])
             if len(failed) > 12:
-                lines += f"\n… 共 {len(failed)} 个失败"
+                lines += f"\n... 共 {len(failed)} 个失败"
             messagebox.showwarning("部分供应商不可用", lines)
 
     def fetch_models(self) -> None:
@@ -161,10 +164,10 @@ class NetworkMixin:
             return
         provider = self.current_provider
         self._run_network(
-            "正在拉取模型列表…",
+            "正在拉取模型列表...",
             self._fetch_action_from_form(),
             lambda models: self._show_remote_models(models, provider),
         )
 
     def _show_remote_models(self, models: list[dict], provider: str) -> None:
-        dialogs.show_remote_models(self, models, provider)
+        remote_dialog.show_remote_models(self, models, provider)

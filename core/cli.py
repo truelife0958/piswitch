@@ -53,7 +53,10 @@ def cli_use(name: str, ts: str, out=print) -> int:
         out(f'piswitch: "{name}" 匹配到多个预设，请写更精确的名称')
         return 1
     core_switch = switch_to(hit, ts)
-    out(f"✓ 已切换到预设 {hit.get('name')} → {core_switch.get('defaultProvider')}/{core_switch.get('defaultModel')}")
+    out(
+        f"已切换到预设 {hit.get('name')}: "
+        f"{core_switch.get('defaultProvider')}/{core_switch.get('defaultModel')}"
+    )
     return 0
 
 
@@ -78,7 +81,7 @@ def cli_model(query: str, ts: str, out=print) -> int:
     prov, mid = next(iter(matches))
     light_backup(ts)
     apply_settings(prov, mid)
-    out(f"✓ pi 默认模型 → {prov}/{mid}")
+    out(f"pi 默认模型: {prov}/{mid}")
     return 0
 
 

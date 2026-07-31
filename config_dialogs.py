@@ -16,7 +16,7 @@ def _resolve_import_conflicts(incoming: dict, clashes: list[str]) -> bool | None
         prompt += (
             f"其中 {len(clashes)} 个已存在：\n"
             + "\n".join(clashes[:8])
-            + (f"\n… 共 {len(clashes)} 个\n\n" if len(clashes) > 8 else "\n\n")
+            + (f"\n... 共 {len(clashes)} 个\n\n" if len(clashes) > 8 else "\n\n")
             + "点“是”覆盖它们，点“否”只导入新的供应商。"
         )
         answer = messagebox.askyesnocancel("导入配置", prompt)
@@ -68,9 +68,12 @@ def _build_template_buttons(parent, tree, templates, app, win, taken: set[str]) 
     buttons = ttk.Frame(parent, padding=(10, 0, 10, 10))
     buttons.pack(fill="x")
     ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
-    ttk.Button(buttons, text="使用此模板", command=use_selected).pack(
-        side="right", padx=8
-    )
+    ttk.Button(
+        buttons,
+        text="使用此模板",
+        command=use_selected,
+        style="Primary.TButton",
+    ).pack(side="right", padx=8)
 
 
 def export_config(app) -> None:
@@ -94,7 +97,7 @@ def export_config(app) -> None:
         messagebox.showerror("导出失败", str(exc))
         return
     count = len(payload["providers"])
-    app.status_var.set(f"已导出 {count} 个供应商 → {Path(path).name}")
+    app.status_var.set(f"已导出 {count} 个供应商到 {Path(path).name}")
     messagebox.showinfo(
         "导出完成",
         f"已导出 {count} 个供应商。\n\n"

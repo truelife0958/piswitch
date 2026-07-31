@@ -51,12 +51,26 @@ class ProviderListMixin:
     def _render_provider_rows(self, select: str | None = None) -> None:
         query = self.provider_filter_var.get()
         self.provider_tree.delete(*self.provider_tree.get_children())
+        visible_index = 0
         for record in self._provider_records:
             if not core.text_matches_query(query, *record["values"]):
                 continue
+            tags = ["stripe"] if visible_index % 2 else []
+            health = record["values"][4]
+            if health == "失败":
+                tags.append("unhealthy")
+            elif record.get("default"):
+                tags.append("default")
+            elif health:
+                tags.append("healthy")
             self.provider_tree.insert(
-                "", "end", iid=record["provider"], values=record["values"]
+                "",
+                "end",
+                iid=record["provider"],
+                values=record["values"],
+                tags=tuple(tags),
             )
+            visible_index += 1
         visible = len(self.provider_tree.get_children())
         total = len(self._provider_records)
         self.provider_count_var.set(
@@ -184,11 +198,18 @@ class ProviderListMixin:
     def _refresh_key_status(self) -> None:
         """Show whether a `$ENV_VAR` key would actually resolve, without waiting for a request."""
         state, variable = core.api_key_status(self.api_key_var.get())
-        self.key_status_var.set({
-            "env_set": f"✓ ${variable} 已设置",
-            "env_missing": f"✗ ${variable} 未设置",
-            "invalid": "✗ $ 后缺少变量名",
-        }.get(state, ""))
+        labels = {
+            "env_set": f"环境变量已设置: ${variable}",
+            "env_missing": f"环境变量未设置: ${variable}",
+            "invalid": "环境变量名无效: $ 后缺少名称",
+        }
+        styles = {
+            "env_set": "Success.TLabel",
+            "env_missing": "Danger.TLabel",
+            "invalid": "Danger.TLabel",
+        }
+        self.key_status_var.set(labels.get(state, ""))
+        self.key_status_label.configure(style=styles.get(state, "Muted.TLabel"))
 
     def toggle_show_hidden(self) -> None:
         # This only changes which rows are visible; the current form remains untouched.

@@ -326,8 +326,8 @@ def test_auth_label_reports_oauth_login_state():
 def test_auth_label_prefixes_builtin_and_collapses_empty():
     custom = {"providers": {}}
     key_auth = {"p": {"type": "api_key", "key": "sk-x"}}
-    assert core.auth_label("p", key_auth, custom, builtin=True) == "内置·API Key"
-    # 无凭据的内置只显示「内置」，不显示「内置·无」
+    assert core.auth_label("p", key_auth, custom, builtin=True) == "内置 / API Key"
+    # 无凭据的内置只显示「内置」，不显示「内置 / 无」
     assert core.auth_label("p", {}, custom, builtin=True) == "内置"
 
 
@@ -359,15 +359,17 @@ def test_provider_rows_hides_listed_builtins_only():
     assert set(_rows_by_id(rows)) == {"mine", "kept"}
 
 
-def test_provider_rows_stars_the_default_and_keeps_health():
+def test_provider_rows_marks_the_default_and_keeps_health():
     custom = {"providers": {"a": {"name": "A", "models": []},
                             "b": {"name": "B", "models": []}}}
     rows = core.provider_rows(custom, {}, {}, default_provider="b",
-                              health={"a": "✓ 120ms"}, hidden=set())
+                              health={"a": "120 ms"}, hidden=set())
     by_id = _rows_by_id(rows)
-    assert by_id["b"]["values"][1] == "★ B"
+    assert by_id["b"]["values"][1] == "[默认] B"
+    assert by_id["b"]["default"] is True
+    assert by_id["a"]["default"] is False
     assert by_id["a"]["values"][1] == "A"
-    assert by_id["a"]["values"][4] == "✓ 120ms"
+    assert by_id["a"]["values"][4] == "120 ms"
     assert by_id["b"]["values"][4] == ""
 
 

@@ -9,13 +9,14 @@ import tkinter as tk
 from tkinter import ttk
 
 import core
+from ui import theme
 
 
 def _build_toolbar(app) -> ttk.Frame:
-    toolbar = ttk.Frame(app, padding=(10, 8))
+    toolbar = ttk.Frame(app, padding=(10, 8), style="Toolbar.TFrame")
     toolbar.pack(fill="x")
-    ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
-    toolbar_actions = ttk.Frame(toolbar)
+    ttk.Label(toolbar, text="piswitch", style="Title.TLabel").pack(side="left")
+    toolbar_actions = ttk.Frame(toolbar, style="Toolbar.TFrame")
     toolbar_actions.pack(side="right")
     app.check_all_button = ttk.Button(
         toolbar_actions, text="检查全部", command=app.check_all_providers
@@ -82,6 +83,7 @@ def _build_provider_pane(app, parent) -> None:
         app.provider_tree.column(column, width=width, minwidth=40, anchor="w")
     provider_scroll = ttk.Scrollbar(parent, orient="vertical", command=app.provider_tree.yview)
     app.provider_tree.configure(yscrollcommand=provider_scroll.set)
+    theme.configure_tree_tags(app.provider_tree)
     # Scrollbar first: pack gives the expanding tree every remaining pixel, so a
     # scrollbar packed after it is allotted nothing and never gets mapped.
     provider_scroll.pack(side="right", fill="y")
@@ -92,7 +94,12 @@ def _build_provider_pane(app, parent) -> None:
 def _setup_provider_actions(app, parent) -> None:
     actions = ttk.Frame(parent)
     actions.pack(fill="x", pady=(10, 14))
-    app.save_provider_button = ttk.Button(actions, text="保存供应商", command=app.save_provider)
+    app.save_provider_button = ttk.Button(
+        actions,
+        text="保存供应商",
+        command=app.save_provider,
+        style="Primary.TButton",
+    )
     app.save_provider_button.pack(side="left")
     app.test_connection_button = ttk.Button(actions, text="测试连接", command=app.test_connection)
     app.test_connection_button.pack(side="left", padx=(8, 0))
@@ -164,8 +171,13 @@ def _build_form(app, parent) -> None:
 def _build_model_header(app, parent) -> None:
     model_header = ttk.Frame(parent)
     model_header.pack(fill="x", pady=(2, 6))
-    ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
-    app.set_default_button = ttk.Button(model_header, text="设为默认", command=app.set_default)
+    ttk.Label(model_header, text="模型", style="Section.TLabel").pack(side="left")
+    app.set_default_button = ttk.Button(
+        model_header,
+        text="设为默认",
+        command=app.set_default,
+        style="Primary.TButton",
+    )
     app.set_default_button.pack(side="left", padx=(10, 0))
     app.model_actions_menu = tk.Menu(app, tearoff=False)
     app.model_actions_menu.add_command(label="增加模型", command=app.add_models)
@@ -226,6 +238,7 @@ def _build_model_tree(app, parent) -> None:
     app.model_tree.column("context", minwidth=58)
     model_scroll = ttk.Scrollbar(model_area, orient="vertical", command=app.model_tree.yview)
     app.model_tree.configure(yscrollcommand=model_scroll.set)
+    theme.configure_tree_tags(app.model_tree)
     model_scroll.pack(side="right", fill="y")
     app.model_tree.pack(side="left", fill="both", expand=True)
     # Double-click a model row to point pi at it.
@@ -238,7 +251,11 @@ def build(app) -> None:
     # Reserve the status bar before the expanding pane. If packed after it, Tk can give
     # the pane all remaining height and leave the status text completely unmapped.
     ttk.Label(
-        app, textvariable=app.status_var, anchor="w", relief="sunken", padding=(8, 4)
+        app,
+        textvariable=app.status_var,
+        anchor="w",
+        padding=(8, 5),
+        style="Status.TLabel",
     ).pack(side="bottom", fill="x")
 
     pane = ttk.PanedWindow(app, orient="horizontal")

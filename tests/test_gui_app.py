@@ -191,12 +191,14 @@ def test_key_status_reports_missing_env_var_while_typing(app, monkeypatch):
     app.api_key_var.set("$PISWITCH_TEST_KEY")
     assert "未设置" in app.key_status_var.get()
     assert "PISWITCH_TEST_KEY" in app.key_status_var.get()
+    assert app.key_status_label.cget("style") == "Danger.TLabel"
 
 
 def test_key_status_reports_set_env_var(app, monkeypatch):
     monkeypatch.setenv("PISWITCH_TEST_KEY", "resolved")
     app.api_key_var.set("$PISWITCH_TEST_KEY")
-    assert "✓" in app.key_status_var.get()
+    assert "已设置" in app.key_status_var.get()
+    assert app.key_status_label.cget("style") == "Success.TLabel"
 
 
 def test_key_status_is_silent_for_literal_and_empty_keys(app):
@@ -232,11 +234,9 @@ def test_set_default_marks_the_row_and_the_provider(app):
     app.model_tree.selection_set(row)
     app.set_default()
 
-    # ★ on the model row...
-    marked = [r for r in app.model_tree.get_children() if app.model_tree.set(r, "default") == "★"]
+    marked = [r for r in app.model_tree.get_children() if app.model_tree.set(r, "default") == "是"]
     assert [app.model_tree.set(r, "id") for r in marked] == ["gpt-4o"]
-    # ...and on the provider row
-    assert app.provider_tree.set("newapi", "name").startswith("★")
+    assert app.provider_tree.set("newapi", "name").startswith("[默认]")
 
 
 def test_set_default_works_on_a_builtin_provider(app):
@@ -325,8 +325,8 @@ def test_check_all_providers_fills_the_health_column(app, monkeypatch):
 
     # every listed provider was probed: 1 custom + 2 builtins
     assert set(probed) == {"newapi", "deepseek", "nvidia"}
-    assert app.provider_tree.set("newapi", "health") == "✓ 42ms"
-    assert app.provider_tree.set("nvidia", "health") == "✗ 失败"
+    assert app.provider_tree.set("newapi", "health") == "42 ms"
+    assert app.provider_tree.set("nvidia", "health") == "失败"
     assert "1 失败" in app.status_var.get()
     # the failure detail is surfaced, not swallowed
     assert warnings and "nvidia" in warnings[0] and "offline" in warnings[0]
@@ -337,11 +337,11 @@ def test_health_column_survives_a_refresh(app, monkeypatch):
         "provider": p, "ok": True, "detail": "ok", "latency_ms": 7})
     app.check_all_providers()
     _drain(app)
-    assert app.provider_tree.set("newapi", "health") == "✓ 7ms"
+    assert app.provider_tree.set("newapi", "health") == "7 ms"
 
     app.refresh_providers()
 
-    assert app.provider_tree.set("newapi", "health") == "✓ 7ms"
+    assert app.provider_tree.set("newapi", "health") == "7 ms"
 
 
 def test_check_all_disables_itself_while_running(app, monkeypatch):
@@ -483,6 +483,84 @@ def test_model_editor_refuses_builtin_providers(app, monkeypatch):
     app.edit_model()
 
     assert infos and "内置" in infos[0]
+
+
+def test_remote_models_mark_imported_rows_and_skip_them(app, monkeypatch):
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+    app.refresh_providers(select="newapi")
+    app._show_remote_models(
+        [
+            {"id": "gpt-4o", "name": "GPT-4o"},
+            {"id": "new-model", "name": "New Model"},
+        ],
+        "newapi",
+    )
+    dialog = _toplevels(app)[0]
+    try:
+        tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+        rows = {tree.set(row, "id"): row for row in tree.get_children()}
+
+        assert tree.set(rows["gpt-4o"], "status") == "已导入"
+        assert tree.set(rows["gpt-4o"], "selected") == ""
+        assert tree.set(rows["new-model"], "status") == ""
+        assert str(_buttons(dialog)["导入所选"].cget("state")) == "disabled"
+        assert str(_buttons(dialog)["清空"].cget("state")) == "disabled"
+
+        _buttons(dialog)["全选"].invoke()
+
+        assert tree.set(rows["gpt-4o"], "selected") == ""
+        assert tree.set(rows["new-model"], "selected") == "[x]"
+        assert str(_buttons(dialog)["导入所选"].cget("state")) == "normal"
+        assert str(_buttons(dialog)["清空"].cget("state")) == "normal"
+        _buttons(dialog)["导入所选"].invoke()
+    finally:
+        if dialog.winfo_exists():
+            dialog.destroy()
+
+    model_ids = [
+        model["id"]
+        for model in core.load_custom()["providers"]["newapi"]["models"]
+    ]
+    assert model_ids.count("gpt-4o") == 1
+    assert model_ids.count("new-model") == 1
+
+
+def test_remote_models_show_missing_local_rows_and_offer_cleanup(app, monkeypatch):
+    prompts = []
+    monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
+    monkeypatch.setattr(
+        piswitch.messagebox,
+        "askyesno",
+        lambda title, prompt, **kwargs: prompts.append((title, prompt)) or True,
+    )
+    app.refresh_providers(select="newapi")
+
+    app._show_remote_models([], "newapi")
+
+    dialog = _toplevels(app)[0]
+    try:
+        tree = next(w for w in _all_widgets(dialog) if w.winfo_class() == "Treeview")
+        rows = {tree.set(row, "id"): row for row in tree.get_children()}
+        labels = [
+            str(widget.cget("text"))
+            for widget in _all_widgets(dialog)
+            if widget.winfo_class() == "TLabel"
+        ]
+
+        assert set(rows) == {"gpt-4o"}
+        assert tree.set(rows["gpt-4o"], "status") == "远端未返回"
+        assert any("1 个已导入模型本次未由远端返回" in text for text in labels)
+        assert str(_buttons(dialog)["全选"].cget("state")) == "disabled"
+        assert str(_buttons(dialog)["导入所选"].cget("state")) == "disabled"
+        assert str(_buttons(dialog)["删除全部未返回项"].cget("state")) == "normal"
+
+        _buttons(dialog)["删除全部未返回项"].invoke()
+    finally:
+        if dialog.winfo_exists():
+            dialog.destroy()
+
+    assert core.load_custom()["providers"]["newapi"]["models"] == []
+    assert prompts and "不一定表示模型已下线" in prompts[0][1]
 
 
 def test_imported_models_inherit_builtin_metadata(app, monkeypatch):
@@ -795,7 +873,7 @@ def test_setting_default_preserves_unsaved_provider_fields(app):
 
     assert app.name_var.get() == "Unsaved but retained"
     assert app.form_status_var.get() == "未保存"
-    assert app.model_tree.set(app.model_tree.get_children()[0], "default") == "★"
+    assert app.model_tree.set(app.model_tree.get_children()[0], "default") == "是"
 
 
 def test_late_model_refresh_never_replaces_another_providers_rows(app):

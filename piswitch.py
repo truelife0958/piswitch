@@ -16,6 +16,7 @@ from ui.model_ops import ModelOpsMixin
 from ui.network import NetworkMixin
 from ui.provider_crud import ProviderCrudMixin
 from ui.provider_list import ProviderListMixin
+from ui import theme
 
 
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "piswitch.png"
@@ -38,17 +39,7 @@ class App(
             except tk.TclError:
                 pass
 
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        # clam ships TButton with width=-11, i.e. "at least 11 characters wide", so every
-        # button rendered 115px regardless of its label — five of them overflowed the
-        # action row and packed 拉取模型 off-screen entirely. Sizing to the actual text
-        # takes the row from 575px to ~419px, which fits with room to spare.
-        style.configure("TButton", width=0, padding=(9, 4))
-        style.configure("Dirty.TLabel", foreground="#9a5a00")
+        theme.apply(self)
 
         self._declare_vars()
         self._build_ui()

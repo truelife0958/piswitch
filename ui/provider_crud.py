@@ -107,7 +107,8 @@ class ProviderCrudMixin:
             messagebox.showinfo(
                 "无法删除",
                 f"{provider} 是内置供应商，不能删除。\n"
-                "可用“更多操作 → 从列表移除”把它隐藏，或用“退出登录”移除其凭据。",
+                "可用“更多操作”菜单中的“从列表移除”把它隐藏，"
+                "或用“退出登录”移除其凭据。",
             )
             return
         prompt = f"删除 {provider} 及其模型和 API key？"

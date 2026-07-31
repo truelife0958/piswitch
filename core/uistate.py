@@ -96,7 +96,7 @@ def auth_label(provider: str, auth: dict, custom: dict, *, builtin: bool) -> str
     else:
         label = "无"
     if builtin:
-        label = f"内置·{label}" if label != "无" else "内置"
+        label = f"内置 / {label}" if label != "无" else "内置"
     return label
 
 
@@ -117,13 +117,14 @@ def provider_rows(custom: dict, auth: dict, store: dict, *,
         builtin = is_builtin_provider(provider, store)
         models = config.get("models", [])
         model_count = len(models) if isinstance(models, list) else 0
-        # ★ 标记 pi 当前默认供应商，比多加一列便宜
+        is_default = provider == default_provider
         label = config.get("name") or provider
-        if provider == default_provider:
-            label = f"★ {label}"
+        if is_default:
+            label = f"[默认] {label}"
         return {
             "provider": provider,
             "custom": is_custom,
+            "default": is_default,
             "values": (
                 provider, label, model_count,
                 auth_label(provider, auth, custom, builtin=builtin),
