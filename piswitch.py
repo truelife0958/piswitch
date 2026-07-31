@@ -231,57 +231,13 @@ class App(tk.Tk):
     def refresh_providers(
         self, select: str | None = None, *, load_selection: bool = True
     ) -> None:
-        custom = core.load_custom()
-        auth = core.load_auth()
         store = core.load_models_store()
-        custom_providers = custom["providers"]
-        default_provider = core.load_settings().get("defaultProvider")
-        records: list[dict] = []
-
-        def _insert(provider: str, config: dict, model_count: int) -> None:
-            kind = core.auth_kind(provider, auth, custom)
-            builtin = core.is_builtin_provider(provider, store)
-            if kind == "oauth":
-                state = core.auth_login_state(provider, auth)
-                auth_label = "已登录" if state == "logged_in" else ("已过期" if state == "expired" else "OAuth")
-            elif kind == "api_key":
-                auth_label = "API Key"
-            else:
-                auth_label = "无"
-            if builtin:
-                auth_label = f"内置·{auth_label}" if auth_label != "无" else "内置"
-            # ★ marks pi's current default provider; cheaper than an extra column.
-            label = config.get("name") or provider
-            if provider == default_provider:
-                label = f"★ {label}"
-            records.append({
-                "provider": provider,
-                "builtin": builtin,
-                "values": (
-                    provider, label, model_count, auth_label,
-                    self._health.get(provider, ""),
-                ),
-            })
-
-        custom_count = 0
-        for provider, config in sorted(custom_providers.items()):
-            if not isinstance(config, dict):
-                continue
-            models = config.get("models", [])
-            model_count = len(models) if isinstance(models, list) else 0
-            _insert(provider, config, model_count)
-            custom_count += 1
-
-        # Then builtin providers not overridden by a custom entry of the same id.
         hidden = set() if self.show_hidden.get() else core.load_hidden_builtins()
-        for provider, info in sorted(store.items()):
-            if provider in custom_providers or not isinstance(info, dict):
-                continue
-            if provider in hidden:
-                continue
-            models = info.get("models", [])
-            model_count = len(models) if isinstance(models, list) else 0
-            _insert(provider, info, model_count)
+        records = core.provider_rows(
+            core.load_custom(), core.load_auth(), store,
+            default_provider=core.load_settings().get("defaultProvider"),
+            health=self._health, hidden=hidden,
+        )
         self._provider_records = records
         target = select or self.current_provider
         self._render_provider_rows(select=target)
@@ -296,9 +252,11 @@ class App(tk.Tk):
             self.provider_tree.selection_set(first)
             self.provider_tree.focus(first)
             self._load_provider(first)
-        # The list holds builtins too, so report both counts rather than only the custom ones.
-        builtin_count = len(records) - custom_count
-        self.status_var.set(f"已加载 {custom_count} 个自定义供应商，{builtin_count} 个内置")
+        # 列表里也有内置，所以两个数都报，而不是只报自定义的
+        custom_count = sum(1 for record in records if record["custom"])
+        self.status_var.set(
+            f"已加载 {custom_count} 个自定义供应商，{len(records) - custom_count} 个内置"
+        )
 
     def _on_provider_selected(self, _event=None) -> None:
         selection = self.provider_tree.selection()

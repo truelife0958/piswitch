@@ -1,6 +1,9 @@
 """Pure derivations the GUI needs. Kept here so they are testable headless."""
 from __future__ import annotations
 
+from .auth import auth_kind, auth_login_state
+from .store import is_builtin_provider
+
 
 def text_matches_query(query: str, *values) -> bool:
     """Case-insensitive AND matching for compact list filters.
@@ -80,3 +83,64 @@ def action_states(
         # so builtins qualify — they are read-only config, not invalid defaults.
         "set_default": not busy and selected,
     }
+
+
+def auth_label(provider: str, auth: dict, custom: dict, *, builtin: bool) -> str:
+    """列表「验证」列的文案。内置供应商加前缀，但无凭据时只显示「内置」。"""
+    kind = auth_kind(provider, auth, custom)
+    if kind == "oauth":
+        state = auth_login_state(provider, auth)
+        label = "已登录" if state == "logged_in" else ("已过期" if state == "expired" else "OAuth")
+    elif kind == "api_key":
+        label = "API Key"
+    else:
+        label = "无"
+    if builtin:
+        label = f"内置·{label}" if label != "无" else "内置"
+    return label
+
+
+def provider_rows(custom: dict, auth: dict, store: dict, *,
+                  default_provider: str | None,
+                  health: dict, hidden: set) -> list[dict]:
+    """供应商列表的行数据。自定义条目覆盖同名内置；hidden 只作用于内置。
+
+    `custom` 标记这一行来自自定义配置——它不等于 `not builtin`，因为自定义
+    条目可以覆盖同名内置，那种行既是内置 id 又该计入自定义。
+    """
+    custom_providers = custom.get("providers", {})
+    if not isinstance(custom_providers, dict):
+        custom_providers = {}
+    rows: list[dict] = []
+
+    def _row(provider: str, config: dict, *, is_custom: bool) -> dict:
+        builtin = is_builtin_provider(provider, store)
+        models = config.get("models", [])
+        model_count = len(models) if isinstance(models, list) else 0
+        # ★ 标记 pi 当前默认供应商，比多加一列便宜
+        label = config.get("name") or provider
+        if provider == default_provider:
+            label = f"★ {label}"
+        return {
+            "provider": provider,
+            "custom": is_custom,
+            "values": (
+                provider, label, model_count,
+                auth_label(provider, auth, custom, builtin=builtin),
+                health.get(provider, ""),
+            ),
+        }
+
+    for provider, config in sorted(custom_providers.items()):
+        if not isinstance(config, dict):
+            continue
+        rows.append(_row(provider, config, is_custom=True))
+
+    # 再补上没有被同名自定义条目覆盖的内置供应商
+    for provider, info in sorted(store.items()):
+        if provider in custom_providers or not isinstance(info, dict):
+            continue
+        if provider in hidden:
+            continue
+        rows.append(_row(provider, info, is_custom=False))
+    return rows

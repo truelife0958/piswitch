@@ -119,6 +119,8 @@ from .transfer import (
 from .uistate import (
     ACTION_KEYS,
     action_states,
+    auth_label,
+    provider_rows,
     range_toggle_targets,
     text_matches_query,
 )
@@ -159,6 +161,7 @@ __all__ = [
     "api_key_status",
     "apply_settings",
     "auth_kind",
+    "auth_label",
     "auth_login_state",
     "auth_path",
     "backfill_proxy_compat",
@@ -213,6 +216,7 @@ __all__ = [
     "probe_provider",
     "provider_api_key",
     "provider_model_map",
+    "provider_rows",
     "range_toggle_targets",
     "read_json",
     "resolve_api_key_value",

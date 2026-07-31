@@ -306,3 +306,81 @@ def test_text_matches_query_is_case_insensitive_and_ands_terms():
     assert core.text_matches_query("OPEN router", "OpenRouter", "https://openrouter.ai")
     assert core.text_matches_query("", "anything")
     assert not core.text_matches_query("open local", "OpenRouter", "remote gateway")
+
+
+def test_auth_label_covers_every_auth_kind():
+    custom = {"providers": {"p": {"api": "openai-completions"}}}
+    key_auth = {"p": {"type": "api_key", "key": "sk-x"}}
+    assert core.auth_label("p", key_auth, custom, builtin=False) == "API Key"
+    assert core.auth_label("p", {}, custom, builtin=False) == "无"
+
+
+def test_auth_label_reports_oauth_login_state():
+    custom = {"providers": {"p": {}}}
+    live = {"p": {"type": "oauth", "access": "t", "expires": 9_999_999_999_999}}
+    dead = {"p": {"type": "oauth", "access": "t", "expires": 1}}
+    assert core.auth_label("p", live, custom, builtin=False) == "已登录"
+    assert core.auth_label("p", dead, custom, builtin=False) == "已过期"
+
+
+def test_auth_label_prefixes_builtin_and_collapses_empty():
+    custom = {"providers": {}}
+    key_auth = {"p": {"type": "api_key", "key": "sk-x"}}
+    assert core.auth_label("p", key_auth, custom, builtin=True) == "内置·API Key"
+    # 无凭据的内置只显示「内置」，不显示「内置·无」
+    assert core.auth_label("p", {}, custom, builtin=True) == "内置"
+
+
+def _rows_by_id(rows):
+    return {r["provider"]: r for r in rows}
+
+
+def test_provider_rows_merges_custom_over_builtin_of_same_id():
+    custom = {"providers": {"dup": {"name": "我的", "models": [1, 2]}}}
+    store = {"dup": {"name": "内置的", "models": [1]}, "only": {"models": []}}
+    rows = core.provider_rows(custom, {}, store, default_provider=None,
+                              health={}, hidden=set())
+    by_id = _rows_by_id(rows)
+    # 同名自定义覆盖内置，列表里只出现一次，用自定义的名字和模型数
+    assert len(rows) == 2
+    assert by_id["dup"]["values"][1] == "我的"
+    assert by_id["dup"]["values"][2] == 2
+    # 覆盖内置的自定义条目仍计入自定义
+    assert by_id["dup"]["custom"] is True
+    assert by_id["only"]["custom"] is False
+
+
+def test_provider_rows_hides_listed_builtins_only():
+    custom = {"providers": {"mine": {"models": []}}}
+    store = {"gone": {"models": []}, "kept": {"models": []}}
+    rows = core.provider_rows(custom, {}, store, default_provider=None,
+                              health={}, hidden={"gone", "mine"})
+    # hidden 只对内置生效，自定义供应商不受影响
+    assert set(_rows_by_id(rows)) == {"mine", "kept"}
+
+
+def test_provider_rows_stars_the_default_and_keeps_health():
+    custom = {"providers": {"a": {"name": "A", "models": []},
+                            "b": {"name": "B", "models": []}}}
+    rows = core.provider_rows(custom, {}, {}, default_provider="b",
+                              health={"a": "✓ 120ms"}, hidden=set())
+    by_id = _rows_by_id(rows)
+    assert by_id["b"]["values"][1] == "★ B"
+    assert by_id["a"]["values"][1] == "A"
+    assert by_id["a"]["values"][4] == "✓ 120ms"
+    assert by_id["b"]["values"][4] == ""
+
+
+def test_provider_rows_tolerates_malformed_entries():
+    custom = {"providers": {"ok": {"models": []}, "bad": "not a dict"}}
+    store = {"okstore": {"models": []}, "badstore": ["nope"]}
+    rows = core.provider_rows(custom, {}, store, default_provider=None,
+                              health={}, hidden=set())
+    assert set(_rows_by_id(rows)) == {"ok", "okstore"}
+
+
+def test_provider_rows_counts_non_list_models_as_zero():
+    custom = {"providers": {"x": {"models": "oops"}}}
+    rows = core.provider_rows(custom, {}, {}, default_provider=None,
+                              health={}, hidden=set())
+    assert rows[0]["values"][2] == 0
