@@ -29,6 +29,7 @@ def save_custom_provider(
     *,
     ts: str,
     original_provider: str | None = None,
+    preserve_auth: bool = False,
 ) -> dict:
     provider = provider.strip()
     name = name.strip()
@@ -62,18 +63,27 @@ def save_custom_provider(
     }
     if api == "openai-completions":
         config["compat"] = merge_openai_proxy_compat(existing.get("compat"))
-    if api_key:
+    if preserve_auth:
+        # OAuth tokens are extension-managed. The GUI renders a status placeholder in
+        # the disabled key field; never turn that placeholder into a literal API key.
+        pass
+    elif api_key:
         config["apiKey"] = api_key
     else:
         config.pop("apiKey", None)
 
     auth = load_auth()
+    original_auth = auth.get(original)
     if original != provider:
         auth.pop(original, None)
-    if api_key:
-        auth[provider] = {"type": "api_key", "key": api_key}
+    if preserve_auth:
+        if isinstance(original_auth, dict) and original_auth:
+            auth[provider] = original_auth
     else:
-        auth.pop(provider, None)
+        if api_key:
+            auth[provider] = {"type": "api_key", "key": api_key}
+        else:
+            auth.pop(provider, None)
 
     settings = load_settings()
     settings_changed = original != provider and settings.get("defaultProvider") == original

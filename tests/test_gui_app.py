@@ -50,6 +50,14 @@ def _all_widgets(widget):
     return out
 
 
+def _action_state(app, key: str) -> str:
+    button = app._action_buttons.get(key)
+    if button is not None:
+        return str(button.cget("state"))
+    menu, index = app._menu_actions[key]
+    return str(menu.entrycget(index, "state"))
+
+
 def _drain(app):
     """Run the queued network callback on the main thread, as the poller would."""
     callback, error = app._network_results.get(timeout=10)
@@ -116,15 +124,15 @@ def test_builtin_selection_disables_mutation_buttons(app):
     app._load_provider("nvidia")  # builtin, from models-store.json
     assert app._current_is_builtin is True
     for key in ("save", "delete_provider", "add_model", "clear_models", "fetch_models"):
-        assert str(app._action_buttons[key].cget("state")) == "disabled", key
-    assert str(app._action_buttons["hide_builtin"].cget("state")) == "normal"
+        assert _action_state(app, key) == "disabled", key
+    assert _action_state(app, "hide_builtin") == "normal"
 
 
 def test_custom_selection_enables_mutation_buttons(app):
     app._load_provider("newapi")  # custom, from models.json
     assert app._current_is_builtin is False
     for key in ("save", "delete_provider", "add_model", "clear_models", "fetch_models"):
-        assert str(app._action_buttons[key].cget("state")) == "normal", key
+        assert _action_state(app, key) == "normal", key
 
 
 def test_network_completion_does_not_unlock_a_builtin(app):
@@ -135,7 +143,7 @@ def test_network_completion_does_not_unlock_a_builtin(app):
     app._load_provider("nvidia")   # user switches to a builtin mid-flight
     app._set_network_busy(False)   # request completes
     for key in ("save", "delete_provider", "add_model", "clear_models", "fetch_models"):
-        assert str(app._action_buttons[key].cget("state")) == "disabled", key
+        assert _action_state(app, key) == "disabled", key
 
 
 def test_new_provider_reenables_the_api_key_field(app, monkeypatch):
@@ -153,6 +161,27 @@ def test_new_provider_reenables_the_api_key_field(app, monkeypatch):
     app.new_provider()
     assert str(app.api_key_entry.cget("state")) == "normal"
     assert str(app._action_buttons["save"].cget("state")) == "normal"
+
+
+def test_saving_oauth_provider_does_not_replace_its_credentials(app):
+    oauth = {"access": "tok", "refresh": "ref", "expires": 9_999_999_999_999}
+    core.write_json_atomic(core.auth_path(), {"corp-x": oauth})
+    custom = core.load_custom()
+    custom["providers"]["corp-x"] = {
+        "name": "Corp X", "baseUrl": "https://corp.example/v1",
+        "api": "openai-completions", "models": [],
+    }
+    core.write_json_atomic(core.models_path(), custom)
+    app.refresh_providers(select="corp-x")
+    assert "OAuth" in app.api_key_var.get()
+
+    app.name_var.set("Corp X Renamed")
+    assert app.save_provider() is True
+
+    assert core.load_auth()["corp-x"] == oauth
+    stored = core.load_custom()["providers"]["corp-x"]
+    assert stored["name"] == "Corp X Renamed"
+    assert "apiKey" not in stored
 
 
 # --- ⑥ $ENV_VAR indicator --------------------------------------------------
@@ -679,3 +708,112 @@ def test_template_picker_cancel_leaves_the_form_alone(app):
     _buttons(dialog)["取消"].invoke()
     assert not _toplevels(app)
     assert app.provider_var.get() == "newapi", "cancel must not touch the form"
+
+
+# --- list filters and unsaved-change protection ---------------------------
+
+def test_provider_filter_keeps_the_current_form_loaded(app):
+    app.refresh_providers(select="newapi")
+    app.name_var.set("尚未保存的名称")
+
+    app.provider_filter_var.set("nvidia")
+
+    assert app.provider_tree.get_children() == ("nvidia",)
+    assert app.current_provider == "newapi"
+    assert app.name_var.get() == "尚未保存的名称"
+    assert app.form_status_var.get() == "未保存"
+    assert app.provider_count_var.get() == "1/3"
+
+
+def test_model_filter_matches_id_or_name(app):
+    core.add_provider_models("newapi", "second-model", ts="20260731-100000")
+    app.refresh_providers(select="newapi")
+
+    app.model_filter_var.set("SECOND")
+
+    rows = app.model_tree.get_children()
+    assert len(rows) == 1
+    assert app.model_tree.set(rows[0], "id") == "second-model"
+    assert app.model_count_var.get() == "1/2"
+
+
+def test_cancel_provider_switch_restores_selection_and_form(app, monkeypatch):
+    app.refresh_providers(select="newapi")
+    app.name_var.set("Keep me")
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: None)
+
+    app.provider_tree.selection_set("nvidia")
+    app._on_provider_selected()
+
+    assert app.current_provider == "newapi"
+    assert app.provider_tree.selection() == ("newapi",)
+    assert app.name_var.get() == "Keep me"
+    assert app.form_status_var.get() == "未保存"
+
+
+def test_discard_provider_edits_then_switches(app, monkeypatch):
+    app.refresh_providers(select="newapi")
+    app.name_var.set("Discard me")
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: False)
+
+    app.provider_tree.selection_set("nvidia")
+    app._on_provider_selected()
+
+    assert app.current_provider == "nvidia"
+    assert app.name_var.get().startswith("nvidia")
+    assert app.form_status_var.get() == ""
+
+
+def test_save_provider_edits_then_switches(app, monkeypatch):
+    app.refresh_providers(select="newapi")
+    app.name_var.set("Saved before switch")
+    monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: True)
+
+    app.provider_tree.selection_set("nvidia")
+    app._on_provider_selected()
+
+    assert app.current_provider == "nvidia"
+    assert core.load_custom()["providers"]["newapi"]["name"] == "Saved before switch"
+
+
+def test_builtin_provider_locks_every_form_control(app):
+    app.refresh_providers(select="nvidia")
+
+    for entry in (app.provider_entry, app.name_entry, app.base_url_entry, app.api_key_entry):
+        assert str(entry.cget("state")) == "disabled"
+    assert str(app.api_combo.cget("state")) == "disabled"
+    assert str(app.key_visibility_check.cget("state")) == "disabled"
+
+
+def test_setting_default_preserves_unsaved_provider_fields(app):
+    app.refresh_providers(select="newapi")
+    app.name_var.set("Unsaved but retained")
+    row = app.model_tree.get_children()[0]
+    app.model_tree.selection_set(row)
+
+    app.set_default()
+
+    assert app.name_var.get() == "Unsaved but retained"
+    assert app.form_status_var.get() == "未保存"
+    assert app.model_tree.set(app.model_tree.get_children()[0], "default") == "★"
+
+
+def test_late_model_refresh_never_replaces_another_providers_rows(app):
+    app.refresh_providers(select="nvidia")
+    before = [app.model_tree.set(row, "id") for row in app.model_tree.get_children()]
+    core.add_provider_models("newapi", "late-model", ts="20260731-100001")
+
+    app._refresh_provider_models("newapi")
+
+    assert app.current_provider == "nvidia"
+    assert [app.model_tree.set(row, "id") for row in app.model_tree.get_children()] == before
+    assert app.provider_tree.set("newapi", "models") == "2"
+
+
+def test_low_frequency_toolbar_actions_live_in_more_menu(app):
+    labels = {
+        app.more_menu.entrycget(index, "label")
+        for index in range(app.more_menu.index("end") + 1)
+        if app.more_menu.type(index) != "separator"
+    }
+    assert labels == {"导入配置", "导出配置", "恢复备份", "显示隐藏的内置供应商"}

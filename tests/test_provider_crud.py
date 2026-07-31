@@ -82,6 +82,21 @@ def test_save_custom_provider_can_rename_and_migrate_references(pi_env):
     assert core.load_settings()["defaultProvider"] == "renamed"
 
 
+def test_save_custom_provider_preserves_oauth_when_renaming():
+    oauth = {"access": "tok", "refresh": "ref", "expires": 9_999_999_999_999}
+    core.write_json_atomic(core.auth_path(), {"newapi": oauth})
+
+    config = core.save_custom_provider(
+        "renamed", "Renamed", "https://gw/v1", "openai-completions",
+        "(OAuth，已登录)", ts="20260731-100000-oauth",
+        original_provider="newapi", preserve_auth=True,
+    )
+
+    assert core.load_auth() == {"renamed": oauth}
+    assert config["apiKey"] == "$NEWAPI_API_KEY"
+    assert config["apiKey"] != "(OAuth，已登录)"
+
+
 def test_rename_rejects_existing_provider_without_changes():
     core.save_custom_provider(
         "other", "Other", "https://other.example/v1", "openai-completions", "",

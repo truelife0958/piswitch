@@ -5,6 +5,7 @@ widgets and attaches them to `app`, and holds no logic of its own.
 """
 from __future__ import annotations
 
+import tkinter as tk
 from tkinter import ttk
 
 import core
@@ -14,15 +15,40 @@ def build(app) -> None:
     toolbar = ttk.Frame(app, padding=(10, 8))
     toolbar.pack(fill="x")
     ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
-    ttk.Button(toolbar, text="新增", command=app.new_provider).pack(side="right", padx=(6, 0))
-    ttk.Button(toolbar, text="从模板", command=app.new_from_template).pack(side="right", padx=(6, 0))
-    ttk.Checkbutton(toolbar, text="显示隐藏", variable=app.show_hidden, command=app.refresh_providers).pack(side="right", padx=(6, 0))
-    ttk.Button(toolbar, text="刷新", command=app.refresh_providers).pack(side="right")
-    app.check_all_button = ttk.Button(toolbar, text="检查全部", command=app.check_all_providers)
-    app.check_all_button.pack(side="right", padx=6)
-    ttk.Button(toolbar, text="恢复备份", command=app.open_backup_restore).pack(side="right", padx=6)
-    ttk.Button(toolbar, text="导入", command=app.import_config).pack(side="right")
-    ttk.Button(toolbar, text="导出", command=app.export_config).pack(side="right", padx=6)
+    toolbar_actions = ttk.Frame(toolbar)
+    toolbar_actions.pack(side="right")
+    app.check_all_button = ttk.Button(
+        toolbar_actions, text="检查全部", command=app.check_all_providers
+    )
+    app.check_all_button.pack(side="left")
+    ttk.Button(toolbar_actions, text="刷新", command=app.request_refresh).pack(
+        side="left", padx=(6, 0)
+    )
+    ttk.Button(toolbar_actions, text="从模板", command=app.new_from_template).pack(
+        side="left", padx=(12, 0)
+    )
+    ttk.Button(toolbar_actions, text="新增", command=app.new_provider).pack(
+        side="left", padx=(6, 0)
+    )
+    app.more_menu = tk.Menu(app, tearoff=False)
+    app.more_menu.add_command(label="导入配置", command=app.import_config)
+    app.more_menu.add_command(label="导出配置", command=app.export_config)
+    app.more_menu.add_command(label="恢复备份", command=app.open_backup_restore)
+    app.more_menu.add_separator()
+    app.more_menu.add_checkbutton(
+        label="显示隐藏的内置供应商",
+        variable=app.show_hidden,
+        command=app.toggle_show_hidden,
+    )
+    ttk.Menubutton(toolbar_actions, text="更多", menu=app.more_menu).pack(
+        side="left", padx=(12, 0)
+    )
+
+    # Reserve the status bar before the expanding pane. If packed after it, Tk can give
+    # the pane all remaining height and leave the status text completely unmapped.
+    ttk.Label(
+        app, textvariable=app.status_var, anchor="w", relief="sunken", padding=(8, 4)
+    ).pack(side="bottom", fill="x")
 
     pane = ttk.PanedWindow(app, orient="horizontal")
     pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
@@ -31,6 +57,23 @@ def build(app) -> None:
     right = ttk.Frame(pane, padding=(8, 4, 0, 4))
     pane.add(left, weight=2)
     pane.add(right, weight=3)
+
+    provider_filter = ttk.Frame(left)
+    provider_filter.pack(fill="x", pady=(0, 6))
+    ttk.Label(provider_filter, text="筛选").pack(side="left")
+    ttk.Label(
+        provider_filter, textvariable=app.provider_count_var, width=5, anchor="e"
+    ).pack(side="right", padx=(6, 0))
+    ttk.Button(
+        provider_filter,
+        text="×",
+        width=2,
+        command=lambda: app.provider_filter_var.set(""),
+    ).pack(side="right")
+    app.provider_filter_entry = ttk.Entry(
+        provider_filter, textvariable=app.provider_filter_var
+    )
+    app.provider_filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 4))
 
     app.provider_tree = ttk.Treeview(
         left,
@@ -70,21 +113,27 @@ def build(app) -> None:
         entry.grid(row=row, column=1, columnspan=2, sticky="ew", pady=5)
         if row == 0:
             app.provider_entry = entry
+        elif row == 1:
+            app.name_entry = entry
+        elif row == 2:
+            app.base_url_entry = entry
 
     ttk.Label(form, text="API 类型").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=5)
-    ttk.Combobox(form, textvariable=app.api_var, values=core.API_TYPES, state="readonly").grid(
-        row=3, column=1, columnspan=2, sticky="ew", pady=5
+    app.api_combo = ttk.Combobox(
+        form, textvariable=app.api_var, values=core.API_TYPES, state="readonly"
     )
+    app.api_combo.grid(row=3, column=1, columnspan=2, sticky="ew", pady=5)
 
     ttk.Label(form, text="API Key").grid(row=4, column=0, sticky="w", padx=(0, 10), pady=5)
     app.api_key_entry = ttk.Entry(form, textvariable=app.api_key_var, show="*")
     app.api_key_entry.grid(row=4, column=1, sticky="ew", pady=5)
-    ttk.Checkbutton(
+    app.key_visibility_check = ttk.Checkbutton(
         form,
         text="显示",
         variable=app.show_key_var,
         command=app._toggle_key_visibility,
-    ).grid(row=4, column=2, sticky="e", padx=(8, 0))
+    )
+    app.key_visibility_check.grid(row=4, column=2, sticky="e", padx=(8, 0))
     app.key_status_label = ttk.Label(form, textvariable=app.key_status_var, anchor="w")
     app.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 2))
 
@@ -94,18 +143,26 @@ def build(app) -> None:
     app.save_provider_button.pack(side="left")
     app.test_connection_button = ttk.Button(actions, text="测试连接", command=app.test_connection)
     app.test_connection_button.pack(side="left", padx=(8, 0))
-    app.delete_provider_button = ttk.Button(actions, text="删除供应商", command=app.delete_provider)
-    app.delete_provider_button.pack(side="left", padx=8)
-    app.logout_provider_button = ttk.Button(actions, text="退出登录", command=app.logout_provider)
-    app.logout_provider_button.pack(side="left", padx=8)
-    app.hide_builtin_button = ttk.Button(actions, text="从列表移除", command=app.toggle_hide_builtin)
-    app.hide_builtin_button.pack(side="left", padx=8)
+    app.provider_actions_menu = tk.Menu(app, tearoff=False)
+    app.provider_actions_menu.add_command(label="删除供应商", command=app.delete_provider)
+    app.provider_actions_menu.add_command(label="退出登录", command=app.logout_provider)
+    app.provider_actions_menu.add_separator()
+    app.provider_actions_menu.add_command(label="从列表移除", command=app.toggle_hide_builtin)
+    app.provider_more_button = ttk.Menubutton(
+        actions, text="更多操作", menu=app.provider_actions_menu
+    )
+    app.provider_more_button.pack(side="left", padx=8)
+    ttk.Label(
+        actions, textvariable=app.form_status_var, style="Dirty.TLabel"
+    ).pack(side="right")
     app._action_buttons = {
         "save": app.save_provider_button,
         "test": app.test_connection_button,
-        "delete_provider": app.delete_provider_button,
-        "logout": app.logout_provider_button,
-        "hide_builtin": app.hide_builtin_button,
+    }
+    app._menu_actions = {
+        "delete_provider": (app.provider_actions_menu, 0),
+        "logout": (app.provider_actions_menu, 1),
+        "hide_builtin": (app.provider_actions_menu, 3),
     }
 
     model_header = ttk.Frame(right)
@@ -113,21 +170,41 @@ def build(app) -> None:
     ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
     app.set_default_button = ttk.Button(model_header, text="设为默认", command=app.set_default)
     app.set_default_button.pack(side="left", padx=(10, 0))
-    app.clear_models_button = ttk.Button(model_header, text="清空", command=app.clear_models)
-    app.clear_models_button.pack(side="right")
-    app.delete_model_button = ttk.Button(model_header, text="删除模型", command=app.delete_model)
-    app.delete_model_button.pack(side="right", padx=6)
-    app.add_model_button = ttk.Button(model_header, text="增加模型", command=app.add_models)
-    app.add_model_button.pack(side="right", padx=6)
+    app.model_actions_menu = tk.Menu(app, tearoff=False)
+    app.model_actions_menu.add_command(label="增加模型", command=app.add_models)
+    app.model_actions_menu.add_command(label="删除所选模型", command=app.delete_model)
+    app.model_actions_menu.add_separator()
+    app.model_actions_menu.add_command(label="清空全部模型", command=app.clear_models)
+    app.model_more_button = ttk.Menubutton(
+        model_header, text="管理", menu=app.model_actions_menu
+    )
+    app.model_more_button.pack(side="right")
     app.fetch_model_button = ttk.Button(model_header, text="拉取模型", command=app.fetch_models)
-    app.fetch_model_button.pack(side="right")
+    app.fetch_model_button.pack(side="right", padx=(0, 6))
     app._action_buttons.update({
-        "add_model": app.add_model_button,
-        "delete_model": app.delete_model_button,
-        "clear_models": app.clear_models_button,
         "fetch_models": app.fetch_model_button,
         "set_default": app.set_default_button,
     })
+    app._menu_actions.update({
+        "add_model": (app.model_actions_menu, 0),
+        "delete_model": (app.model_actions_menu, 1),
+        "clear_models": (app.model_actions_menu, 3),
+    })
+
+    model_filter = ttk.Frame(right)
+    model_filter.pack(fill="x", pady=(0, 6))
+    ttk.Label(model_filter, text="筛选模型").pack(side="left")
+    ttk.Label(
+        model_filter, textvariable=app.model_count_var, width=5, anchor="e"
+    ).pack(side="right", padx=(6, 0))
+    ttk.Button(
+        model_filter,
+        text="×",
+        width=2,
+        command=lambda: app.model_filter_var.set(""),
+    ).pack(side="right")
+    app.model_filter_entry = ttk.Entry(model_filter, textvariable=app.model_filter_var)
+    app.model_filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 4))
 
     model_area = ttk.Frame(right)
     model_area.pack(fill="both", expand=True)
@@ -147,11 +224,10 @@ def build(app) -> None:
         app.model_tree.heading(column, text=title)
         app.model_tree.column(column, width=width, minwidth=40, anchor="w")
     app.model_tree.column("default", anchor="center", stretch=False)
+    app.model_tree.column("context", minwidth=58)
     model_scroll = ttk.Scrollbar(model_area, orient="vertical", command=app.model_tree.yview)
     app.model_tree.configure(yscrollcommand=model_scroll.set)
     model_scroll.pack(side="right", fill="y")
     app.model_tree.pack(side="left", fill="both", expand=True)
     # Double-click a model row to point pi at it.
     app.model_tree.bind("<Double-Button-1>", app._on_model_double_click)
-
-    ttk.Label(app, textvariable=app.status_var, anchor="w", relief="sunken", padding=(8, 4)).pack(fill="x")

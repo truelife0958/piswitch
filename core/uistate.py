@@ -1,6 +1,19 @@
 """Pure derivations the GUI needs. Kept here so they are testable headless."""
 from __future__ import annotations
 
+
+def text_matches_query(query: str, *values) -> bool:
+    """Case-insensitive AND matching for compact list filters.
+
+    Splitting the query into words lets ``open router`` match text containing both
+    terms without requiring them to be adjacent or in the same field.
+    """
+    terms = str(query or "").casefold().split()
+    if not terms:
+        return True
+    haystack = " ".join(str(value or "") for value in values).casefold()
+    return all(term in haystack for term in terms)
+
 def range_toggle_targets(iids, anchor_iid, click_iid, is_selected):
     """Compute the (iid, target_checked) plan for a Shift+click marquee toggle.
 

@@ -50,6 +50,7 @@ class App(tk.Tk):
         # action row and packed 拉取模型 off-screen entirely. Sizing to the actual text
         # takes the row from 575px to ~419px, which fits with room to spare.
         style.configure("TButton", width=0, padding=(9, 4))
+        style.configure("Dirty.TLabel", foreground="#9a5a00")
 
         self.current_provider: str | None = None
         # Facts about the current selection that action-button state derives from.
@@ -64,17 +65,37 @@ class App(tk.Tk):
         self.key_status_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="就绪")
+        self.form_status_var = tk.StringVar()
         self.show_hidden = tk.BooleanVar(value=False)  # show builtin providers the user hid
+        self.provider_filter_var = tk.StringVar()
+        self.provider_count_var = tk.StringVar()
+        self.model_filter_var = tk.StringVar()
+        self.model_count_var = tk.StringVar()
         self._network_results: queue.Queue = queue.Queue()
         self._network_busy = False
         # provider id -> last health-check cell text; survives refresh_providers redraws.
         self._health: dict[str, str] = {}
+        self._provider_records: list[dict] = []
+        self._current_config: dict = {}
+        self._tracking_form = False
+        self._form_snapshot: tuple[str, ...] = ()
+        self._form_dirty = False
 
         self._build_ui()
         self.bind("<Control-n>", lambda _event: self.new_provider())
         self.bind("<Control-s>", lambda _event: self.save_provider())
-        # Re-evaluate the $ENV_VAR indicator as the field is typed into.
+        self.bind("<Control-f>", lambda _event: self.provider_filter_entry.focus_set())
+        for variable in (
+            self.provider_var, self.name_var, self.base_url_var,
+            self.api_var, self.api_key_var,
+        ):
+            variable.trace_add("write", self._on_form_changed)
+        # Re-evaluate the $ENV_VAR indicator and the two list filters while typing.
         self.api_key_var.trace_add("write", lambda *_a: self._refresh_key_status())
+        self.provider_filter_var.trace_add("write", self._on_provider_filter_changed)
+        self.model_filter_var.trace_add("write", self._on_model_filter_changed)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._tracking_form = True
         self.after(100, self._poll_network_results)
         self.refresh_providers()
 
@@ -83,6 +104,73 @@ class App(tk.Tk):
 
     def _toggle_key_visibility(self) -> None:
         self.api_key_entry.configure(show="" if self.show_key_var.get() else "*")
+
+    def _capture_form_state(self) -> tuple[str, ...]:
+        return tuple(variable.get() for variable in (
+            self.provider_var,
+            self.name_var,
+            self.base_url_var,
+            self.api_var,
+            self.api_key_var,
+        ))
+
+    def _on_form_changed(self, *_args) -> None:
+        if not self._tracking_form:
+            return
+        dirty = not self._current_is_builtin and self._capture_form_state() != self._form_snapshot
+        if dirty == self._form_dirty:
+            return
+        self._form_dirty = dirty
+        self.form_status_var.set("未保存" if dirty else "")
+        self.title("piswitch *" if dirty else "piswitch")
+
+    def _mark_form_clean(self) -> None:
+        self._form_snapshot = self._capture_form_state()
+        self._form_dirty = False
+        self.form_status_var.set("")
+        self.title("piswitch")
+
+    def _confirm_form_transition(self) -> bool:
+        """Offer save/discard/cancel before an action would replace the form."""
+        if not self._form_dirty:
+            return True
+        answer = messagebox.askyesnocancel(
+            "未保存的修改",
+            "供应商信息尚未保存。\n\n"
+            "选择“是”保存后继续，“否”放弃修改，“取消”留在当前页面。",
+            parent=self,
+        )
+        if answer is None:
+            return False
+        if answer:
+            return self.save_provider()
+        return True
+
+    def _restore_provider_selection(self) -> None:
+        selection = self.provider_tree.selection()
+        if selection:
+            self.provider_tree.selection_remove(*selection)
+        if self.current_provider and self.provider_tree.exists(self.current_provider):
+            self.provider_tree.selection_set(self.current_provider)
+            self.provider_tree.focus(self.current_provider)
+
+    def _on_close(self) -> None:
+        if self._confirm_form_transition():
+            self.destroy()
+
+    def request_refresh(self) -> None:
+        if self._confirm_form_transition():
+            self.refresh_providers()
+
+    def toggle_show_hidden(self) -> None:
+        # This only changes which rows are visible; the current form remains untouched.
+        self.refresh_providers(load_selection=False)
+
+    def _on_provider_filter_changed(self, *_args) -> None:
+        self._render_provider_rows(select=self.current_provider)
+
+    def _on_model_filter_changed(self, *_args) -> None:
+        self._refresh_models(self._current_config)
 
     def _apply_action_states(self) -> None:
         """Push the derived enable/disable state onto every action button.
@@ -96,21 +184,59 @@ class App(tk.Tk):
             builtin=self._current_is_builtin,
             has_oauth=self._current_has_oauth,
         )
-        for key, button in self._action_buttons.items():
-            button.configure(state="normal" if states[key] else "disabled")
-        self.hide_builtin_button.configure(
-            text="恢复显示" if self._current_is_hidden else "从列表移除"
+        for key, enabled in states.items():
+            state = "normal" if enabled else "disabled"
+            button = self._action_buttons.get(key)
+            if button is not None:
+                button.configure(state=state)
+            elif key in self._menu_actions:
+                menu, index = self._menu_actions[key]
+                menu.entryconfigure(index, state=state)
+        self.provider_actions_menu.entryconfigure(
+            self._menu_actions["hide_builtin"][1],
+            label="恢复显示" if self._current_is_hidden else "从列表移除",
+        )
+        self.provider_more_button.configure(
+            state="normal" if any(
+                states[key] for key in ("delete_provider", "logout", "hide_builtin")
+            ) else "disabled"
+        )
+        self.model_more_button.configure(
+            state="normal" if any(
+                states[key] for key in ("add_model", "delete_model", "clear_models")
+            ) else "disabled"
         )
         # Batch check depends only on the network being idle, not on any selection.
         self.check_all_button.configure(state="disabled" if self._network_busy else "normal")
 
-    def refresh_providers(self, select: str | None = None) -> None:
+    def _render_provider_rows(self, select: str | None = None) -> None:
+        query = self.provider_filter_var.get()
+        self.provider_tree.delete(*self.provider_tree.get_children())
+        for record in self._provider_records:
+            if not core.text_matches_query(query, *record["values"]):
+                continue
+            self.provider_tree.insert(
+                "", "end", iid=record["provider"], values=record["values"]
+            )
+        visible = len(self.provider_tree.get_children())
+        total = len(self._provider_records)
+        self.provider_count_var.set(
+            f"{visible}/{total}" if query.strip() else f"{total} 个"
+        )
+        if select and self.provider_tree.exists(select):
+            self.provider_tree.selection_set(select)
+            self.provider_tree.focus(select)
+            self.provider_tree.see(select)
+
+    def refresh_providers(
+        self, select: str | None = None, *, load_selection: bool = True
+    ) -> None:
         custom = core.load_custom()
         auth = core.load_auth()
         store = core.load_models_store()
         custom_providers = custom["providers"]
         default_provider = core.load_settings().get("defaultProvider")
-        self.provider_tree.delete(*self.provider_tree.get_children())
+        records: list[dict] = []
 
         def _insert(provider: str, config: dict, model_count: int) -> None:
             kind = core.auth_kind(provider, auth, custom)
@@ -128,12 +254,14 @@ class App(tk.Tk):
             label = config.get("name") or provider
             if provider == default_provider:
                 label = f"★ {label}"
-            self.provider_tree.insert(
-                "",
-                "end",
-                iid=provider,
-                values=(provider, label, model_count, auth_label, self._health.get(provider, "")),
-            )
+            records.append({
+                "provider": provider,
+                "builtin": builtin,
+                "values": (
+                    provider, label, model_count, auth_label,
+                    self._health.get(provider, ""),
+                ),
+            })
 
         custom_count = 0
         for provider, config in sorted(custom_providers.items()):
@@ -154,26 +282,34 @@ class App(tk.Tk):
             models = info.get("models", [])
             model_count = len(models) if isinstance(models, list) else 0
             _insert(provider, info, model_count)
+        self._provider_records = records
         target = select or self.current_provider
+        self._render_provider_rows(select=target)
         if target and self.provider_tree.exists(target):
-            self.provider_tree.selection_set(target)
-            self.provider_tree.focus(target)
-            self.provider_tree.see(target)
-            self._load_provider(target)
-        elif not self.provider_tree.get_children():
-            self.new_provider()
-        else:
+            if load_selection:
+                self._load_provider(target)
+        elif load_selection and not self.provider_tree.get_children():
+            if not self.provider_filter_var.get().strip():
+                self._reset_new_provider_form()
+        elif load_selection:
             first = self.provider_tree.get_children()[0]
             self.provider_tree.selection_set(first)
+            self.provider_tree.focus(first)
             self._load_provider(first)
         # The list holds builtins too, so report both counts rather than only the custom ones.
-        builtin_count = len(self.provider_tree.get_children()) - custom_count
+        builtin_count = len(records) - custom_count
         self.status_var.set(f"已加载 {custom_count} 个自定义供应商，{builtin_count} 个内置")
 
     def _on_provider_selected(self, _event=None) -> None:
         selection = self.provider_tree.selection()
         if selection:
-            self._load_provider(selection[0])
+            target = selection[0]
+            if target == self.current_provider:
+                return
+            if not self._confirm_form_transition():
+                self._restore_provider_selection()
+                return
+            self._load_provider(target)
 
     def _load_provider(self, provider: str) -> None:
         custom = core.load_custom()
@@ -197,40 +333,60 @@ class App(tk.Tk):
         )
         self._current_is_hidden = builtin and provider in core.load_hidden_builtins()
 
-        self.provider_var.set(provider)
-        self.name_var.set(config.get("name") or provider)
-        self.base_url_var.set(config.get("baseUrl", ""))
-        self.api_var.set(config.get("api", core.API_TYPES[0]))
-        if kind == "oauth":
-            # OAuth access tokens are extension-managed; show read-only status instead.
-            self.api_key_var.set(OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)"))
-        elif kind == "api_key":
-            auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
-            self.api_key_var.set(auth_key or config.get("apiKey", ""))
-        else:
-            self.api_key_var.set(config.get("apiKey", ""))
+        self._tracking_form = False
+        try:
+            self.provider_var.set(provider)
+            self.name_var.set(config.get("name") or provider)
+            self.base_url_var.set(config.get("baseUrl", ""))
+            self.api_var.set(config.get("api", core.API_TYPES[0]))
+            if kind == "oauth":
+                # OAuth access tokens are extension-managed; show read-only status instead.
+                self.api_key_var.set(
+                    OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)")
+                )
+            elif kind == "api_key":
+                auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
+                self.api_key_var.set(auth_key or config.get("apiKey", ""))
+            else:
+                self.api_key_var.set(config.get("apiKey", ""))
 
-        # Builtin providers are read-only: lock the form and label the store's own values.
-        if builtin:
-            self.name_var.set(config.get("name") or f"{provider} (内置)")
-            self.base_url_var.set(config.get("baseUrl") or "(内置)")
-        self.provider_entry.configure(state="disabled" if builtin else "normal")
-        self.api_key_entry.configure(
-            state="normal" if not builtin and kind != "oauth" else "disabled"
-        )
+            # Builtin providers are read-only: label missing store-owned values clearly.
+            if builtin:
+                self.name_var.set(config.get("name") or f"{provider} (内置)")
+                self.base_url_var.set(config.get("baseUrl") or "(内置)")
+            self.show_key_var.set(False)
+            self._toggle_key_visibility()
+        finally:
+            self._tracking_form = True
+
+        field_state = "disabled" if builtin else "normal"
+        self.provider_entry.configure(state=field_state)
+        self.name_entry.configure(state=field_state)
+        self.base_url_entry.configure(state=field_state)
+        self.api_combo.configure(state="disabled" if builtin else "readonly")
+        key_editable = not builtin and kind != "oauth"
+        self.api_key_entry.configure(state="normal" if key_editable else "disabled")
+        self.key_visibility_check.configure(state="normal" if key_editable else "disabled")
+        self._current_config = config
         self._apply_action_states()
         self._refresh_models(config)
+        self._mark_form_clean()
 
     def _refresh_models(self, config: dict) -> None:
         self.model_tree.delete(*self.model_tree.get_children())
         models = config.get("models", [])
         if not isinstance(models, list):
+            self.model_count_var.set("0 个")
             return
+        query = self.model_filter_var.get()
         settings = core.load_settings()
         default_provider = settings.get("defaultProvider")
         default_model = settings.get("defaultModel")
+        visible = 0
         for index, model in enumerate(models):
             if not isinstance(model, dict) or not model.get("id"):
+                continue
+            if not core.text_matches_query(query, model.get("id"), model.get("name")):
                 continue
             is_default = self.current_provider == default_provider and model["id"] == default_model
             self.model_tree.insert(
@@ -245,13 +401,21 @@ class App(tk.Tk):
                     "是" if model.get("reasoning") else "否",
                 ),
             )
+            visible += 1
+        total = sum(
+            1 for model in models
+            if isinstance(model, dict) and model.get("id")
+        )
+        self.model_count_var.set(
+            f"{visible}/{total}" if query.strip() else f"{total} 个"
+        )
 
     def _refresh_key_status(self) -> None:
         """Show whether a `$ENV_VAR` key would actually resolve, without waiting for a request."""
         state, variable = core.api_key_status(self.api_key_var.get())
         self.key_status_var.set({
-            "env_set": f"✓ 环境变量 ${variable} 已设置",
-            "env_missing": f"✗ 环境变量 ${variable} 未设置——请求时会失败",
+            "env_set": f"✓ ${variable} 已设置",
+            "env_missing": f"✗ ${variable} 未设置",
             "invalid": "✗ $ 后缺少变量名",
         }.get(state, ""))
 
@@ -313,36 +477,55 @@ class App(tk.Tk):
         except (OSError, ValueError) as exc:
             messagebox.showerror("设为默认失败", str(exc))
             return
-        self.refresh_providers(select=provider)
+        self._refresh_provider_models(provider)
         self.status_var.set(f"pi 默认模型 → {provider}/{model_id}")
 
-    def new_provider(self) -> None:
+    def _reset_new_provider_form(self) -> None:
         self.current_provider = None
         self._current_is_builtin = False
         self._current_has_oauth = False
         self._current_is_hidden = False
+        self._current_config = {}
         selection = self.provider_tree.selection()
         if selection:
             self.provider_tree.selection_remove(*selection)
         self.provider_entry.configure(state="normal")
-        # Re-enable the key field: it is left disabled by an OAuth or builtin selection.
+        self.name_entry.configure(state="normal")
+        self.base_url_entry.configure(state="normal")
+        self.api_combo.configure(state="readonly")
         self.api_key_entry.configure(state="normal")
-        self.provider_var.set("")
-        self.name_var.set("")
-        self.base_url_var.set("https://")
-        self.api_var.set(core.API_TYPES[0])
-        self.api_key_var.set("")
+        self.key_visibility_check.configure(state="normal")
+        self._tracking_form = False
+        try:
+            self.provider_var.set("")
+            self.name_var.set("")
+            self.base_url_var.set("https://")
+            self.api_var.set(core.API_TYPES[0])
+            self.api_key_var.set("")
+            self.show_key_var.set(False)
+            self._toggle_key_visibility()
+        finally:
+            self._tracking_form = True
         self.model_tree.delete(*self.model_tree.get_children())
+        self.model_count_var.set("0 个")
         self._apply_action_states()  # new-provider mode: save/test on, per-provider actions off
+        self._mark_form_clean()
         self.provider_entry.focus_set()
         self.status_var.set("填写供应商信息后保存")
 
+    def new_provider(self) -> bool:
+        if not self._confirm_form_transition():
+            return False
+        self._reset_new_provider_form()
+        return True
+
     def new_from_template(self) -> None:
-        dialogs.choose_template(self)
+        if self._confirm_form_transition():
+            dialogs.choose_template(self)
 
     def apply_template_values(self, values: dict) -> None:
         """Seed the form from a template, as a brand-new unsaved provider."""
-        self.new_provider()
+        self._reset_new_provider_form()
         self.provider_var.set(values["provider"])
         self.name_var.set(values["name"])
         self.base_url_var.set(values["baseUrl"])
@@ -351,14 +534,14 @@ class App(tk.Tk):
         self._apply_action_states()
         self.status_var.set(f"已套用模板 {values['name']}——确认 Base URL 与 Key 后保存")
 
-    def save_provider(self) -> None:
+    def save_provider(self) -> bool:
         provider = self.provider_var.get().strip()
         if core.is_builtin_provider(provider, core.load_models_store()):
             messagebox.showerror("保存失败", f"{provider} 是内置供应商，不能覆盖或保存。")
-            return
+            return False
         if not self.current_provider and provider in core.load_custom()["providers"]:
             messagebox.showerror("保存失败", f"Provider ID {provider} 已存在，请从左侧选择后编辑")
-            return
+            return False
         original_provider = self.current_provider
         try:
             core.save_custom_provider(
@@ -369,13 +552,31 @@ class App(tk.Tk):
                 self.api_key_var.get(),
                 ts=mutation_timestamp(),
                 original_provider=original_provider,
+                preserve_auth=self._current_has_oauth,
             )
         except (OSError, ValueError) as exc:
             messagebox.showerror("保存失败", str(exc))
-            return
+            return False
         self.current_provider = provider
         self.refresh_providers(select=provider)
         self.status_var.set(f"已保存供应商 {provider}")
+        return True
+
+    def _refresh_provider_models(self, provider: str) -> None:
+        """Reload model rows and provider summaries without replacing form edits."""
+        if provider != self.current_provider:
+            # A fetch/editor started on A may finish after the user switched to B.
+            # Update provider summaries, but never put A's model rows under B's form.
+            self.refresh_providers(load_selection=False)
+            return
+        custom = core.load_custom()
+        store = core.load_models_store()
+        config = custom["providers"].get(provider)
+        if not isinstance(config, dict):
+            config = store.get(provider, {})
+        self._current_config = config if isinstance(config, dict) else {}
+        self.refresh_providers(select=provider, load_selection=False)
+        self._refresh_models(self._current_config)
 
     def _set_network_busy(self, busy: bool) -> None:
         self._network_busy = busy
@@ -538,7 +739,7 @@ class App(tk.Tk):
         if not provider:
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除。\n可用左侧“从列表移除”把它从本列表中隐藏，或用“退出登录”移除其凭据。")
+            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除。\n可用“更多操作 → 从列表移除”把它隐藏，或用“退出登录”移除其凭据。")
             return
         prompt = f"删除 {provider} 及其模型和 API key？"
         if core.is_default_provider(provider):
@@ -559,6 +760,8 @@ class App(tk.Tk):
         self.status_var.set(f"已删除供应商 {provider}")
 
     def logout_provider(self) -> None:
+        if not self._confirm_form_transition():
+            return
         provider = self.current_provider
         if not provider:
             return
@@ -605,7 +808,9 @@ class App(tk.Tk):
         else:
             core.hide_builtin(provider)
             self.refresh_providers()
-            self.status_var.set(f"已从列表移除 {provider}（勾选顶部“显示隐藏”可重新显示）")
+            self.status_var.set(
+                f"已从列表移除 {provider}（顶部“更多”中可重新显示）"
+            )
 
     def add_models(self) -> None:
         provider = self.current_provider
@@ -632,7 +837,7 @@ class App(tk.Tk):
         except (OSError, ValueError) as exc:
             messagebox.showerror("增加失败", str(exc))
             return
-        self.refresh_providers(select=provider)
+        self._refresh_provider_models(provider)
         self.status_var.set(f"已更新 {provider} 的模型")
 
     def delete_model(self) -> None:
@@ -672,7 +877,7 @@ class App(tk.Tk):
         except OSError as exc:
             messagebox.showerror("删除失败", str(exc))
             return
-        self.refresh_providers(select=provider)
+        self._refresh_provider_models(provider)
         self.status_var.set(f"已删除 {count} 个模型")
 
     def clear_models(self) -> None:
@@ -708,14 +913,15 @@ class App(tk.Tk):
         except OSError as exc:
             messagebox.showerror("清空失败", str(exc))
             return
-        self.refresh_providers(select=provider)
+        self._refresh_provider_models(provider)
         self.status_var.set(f"已清空 {removed} 个模型")
 
     def export_config(self) -> None:
         dialogs.export_config(self)
 
     def import_config(self) -> None:
-        dialogs.import_config(self)
+        if self._confirm_form_transition():
+            dialogs.import_config(self)
 
     def open_backup_restore(self) -> None:
         dialogs.open_backup_restore(self)

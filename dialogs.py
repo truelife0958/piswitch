@@ -148,7 +148,7 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
             messagebox.showerror("导入失败", str(exc), parent=win)
             return
         win.destroy()
-        app.refresh_providers(select=provider)
+        app._refresh_provider_models(provider)
         app.status_var.set(f"已导入 {len(selected_ids)} 个模型")
 
     buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
@@ -193,6 +193,8 @@ def open_backup_restore(app) -> None:
     def restore_selected() -> None:
         selection = tree.selection()
         if not selection:
+            return
+        if not app._confirm_form_transition():
             return
         backup = backups[int(selection[0])]
         if not messagebox.askyesno("确认恢复", f"恢复备份 {backup.name}？", parent=win):
@@ -260,7 +262,7 @@ def open_model_editor(app, provider: str, model: dict) -> None:
             messagebox.showerror("保存失败", str(exc), parent=win)
             return
         win.destroy()
-        app.refresh_providers(select=provider)
+        app._refresh_provider_models(provider)
         app.status_var.set(f"已更新模型 {model['id']}")
 
     buttons = ttk.Frame(win, padding=(12, 0, 12, 12))

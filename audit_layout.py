@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import tkinter.font as tkfont
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -53,11 +54,18 @@ def audit_tree(label: str, tree) -> None:
     cols = tree.cget("columns")
     total = sum(int(tree.column(c, "width")) for c in cols)
     rendered = tree.winfo_width()
+    heading_font = tkfont.nametofont("TkHeadingFont", root=tree)
     print(f"\n[{label}] rendered={rendered}px  columns sum={total}px")
     for col in cols:
+        title = str(tree.heading(col)["text"])
+        width = int(tree.column(col, "width"))
         print(f"    {str(col):10s} width={tree.column(col, 'width'):>4}  "
               f"minwidth={tree.column(col, 'minwidth'):>3}  "
-              f"stretch={tree.column(col, 'stretch')}  heading={tree.heading(col)['text']}")
+              f"stretch={tree.column(col, 'stretch')}  heading={title}")
+        # Ttk headings need a little room around the measured label for theme padding.
+        needed = heading_font.measure(title) + 10
+        if width < needed:
+            flag(f"{label}: {title!r} 表头需要约 {needed}px，当前列宽仅 {width}px")
     if total > rendered:
         flag(f"{label}: 列宽合计 {total}px 超出渲染宽度 {rendered}px，"
              f"末列被裁掉约 {total - rendered}px（用户需拖拽分隔条才能看全）")
@@ -70,9 +78,10 @@ def walk(widget, depth=0):
         cls = child.winfo_class()
         w, h = child.winfo_width(), child.winfo_height()
         mapped = bool(child.winfo_ismapped())
-        if not mapped and cls not in ("Toplevel",):
+        # Menus are intentionally unmapped until their Menubutton is opened.
+        if not mapped and cls not in ("Toplevel", "Menu"):
             flag(f"未映射控件 {cls} ({child})")
-        elif (w <= 1 or h <= 1) and cls not in ("Frame", "TFrame", "Toplevel"):
+        elif (w <= 1 or h <= 1) and cls not in ("Frame", "TFrame", "Toplevel", "Menu"):
             flag(f"零尺寸控件 {cls} {w}x{h} ({child})")
         # A button whose natural width exceeds its allotted width shows clipped text.
         if cls in ("TButton", "TLabel") and mapped:
@@ -112,6 +121,8 @@ def main() -> int:
     print(f"\n=== 缩到 minsize {mw}x{mh} 后 ===")
     audit_tree("provider_tree@min", app.provider_tree)
     audit_tree("model_tree@min", app.model_tree)
+    print("\n[widget tree@min]")
+    walk(app)
 
     app.destroy()
     print(f"\n审计完成：{len(problems)} 个问题，{len(notes)} 条提示")

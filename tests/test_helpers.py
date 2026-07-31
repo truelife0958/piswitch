@@ -300,3 +300,9 @@ def test_hidden_builtins_accepts_legacy_dict_shape(monkeypatch, tmp_path):
     tmp_path.joinpath("hidden_builtins.json").write_text(
         '{"providers": ["a", "b"]}', encoding="utf-8")
     assert core.load_hidden_builtins() == {"a", "b"}
+
+
+def test_text_matches_query_is_case_insensitive_and_ands_terms():
+    assert core.text_matches_query("OPEN router", "OpenRouter", "https://openrouter.ai")
+    assert core.text_matches_query("", "anything")
+    assert not core.text_matches_query("open local", "OpenRouter", "remote gateway")

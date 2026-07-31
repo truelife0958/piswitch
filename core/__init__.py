@@ -120,6 +120,7 @@ from .uistate import (
     ACTION_KEYS,
     action_states,
     range_toggle_targets,
+    text_matches_query,
 )
 from .cli import (
     USAGE,
@@ -134,6 +135,7 @@ __all__ = [
     "unique_provider_id",
     "template_form_values",
     "template_by_id",
+    "text_matches_query",
     "PROVIDER_TEMPLATES",
     "API_TYPES",
     "mutation_timestamp",
