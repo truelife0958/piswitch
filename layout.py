@@ -11,7 +11,7 @@ from tkinter import ttk
 import core
 
 
-def build(app) -> None:
+def _build_toolbar(app) -> ttk.Frame:
     toolbar = ttk.Frame(app, padding=(10, 8))
     toolbar.pack(fill="x")
     ttk.Label(toolbar, text="自定义模型供应商", font=("TkDefaultFont", 13, "bold")).pack(side="left")
@@ -43,22 +43,11 @@ def build(app) -> None:
     ttk.Menubutton(toolbar_actions, text="更多", menu=app.more_menu).pack(
         side="left", padx=(12, 0)
     )
+    return toolbar
 
-    # Reserve the status bar before the expanding pane. If packed after it, Tk can give
-    # the pane all remaining height and leave the status text completely unmapped.
-    ttk.Label(
-        app, textvariable=app.status_var, anchor="w", relief="sunken", padding=(8, 4)
-    ).pack(side="bottom", fill="x")
 
-    pane = ttk.PanedWindow(app, orient="horizontal")
-    pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
-
-    left = ttk.Frame(pane, padding=(0, 4, 8, 4))
-    right = ttk.Frame(pane, padding=(8, 4, 0, 4))
-    pane.add(left, weight=2)
-    pane.add(right, weight=3)
-
-    provider_filter = ttk.Frame(left)
+def _build_provider_pane(app, parent) -> None:
+    provider_filter = ttk.Frame(parent)
     provider_filter.pack(fill="x", pady=(0, 6))
     ttk.Label(provider_filter, text="筛选").pack(side="left")
     ttk.Label(
@@ -76,7 +65,7 @@ def build(app) -> None:
     app.provider_filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 4))
 
     app.provider_tree = ttk.Treeview(
-        left,
+        parent,
         columns=("provider", "name", "models", "auth", "health"),
         show="headings",
         selectmode="browse",
@@ -91,7 +80,7 @@ def build(app) -> None:
     for column, title, width in headings:
         app.provider_tree.heading(column, text=title)
         app.provider_tree.column(column, width=width, minwidth=40, anchor="w")
-    provider_scroll = ttk.Scrollbar(left, orient="vertical", command=app.provider_tree.yview)
+    provider_scroll = ttk.Scrollbar(parent, orient="vertical", command=app.provider_tree.yview)
     app.provider_tree.configure(yscrollcommand=provider_scroll.set)
     # Scrollbar first: pack gives the expanding tree every remaining pixel, so a
     # scrollbar packed after it is allotted nothing and never gets mapped.
@@ -99,7 +88,39 @@ def build(app) -> None:
     app.provider_tree.pack(side="left", fill="both", expand=True)
     app.provider_tree.bind("<<TreeviewSelect>>", app._on_provider_selected)
 
-    form = ttk.Frame(right)
+
+def _setup_provider_actions(app, parent) -> None:
+    actions = ttk.Frame(parent)
+    actions.pack(fill="x", pady=(10, 14))
+    app.save_provider_button = ttk.Button(actions, text="保存供应商", command=app.save_provider)
+    app.save_provider_button.pack(side="left")
+    app.test_connection_button = ttk.Button(actions, text="测试连接", command=app.test_connection)
+    app.test_connection_button.pack(side="left", padx=(8, 0))
+    app.provider_actions_menu = tk.Menu(app, tearoff=False)
+    app.provider_actions_menu.add_command(label="删除供应商", command=app.delete_provider)
+    app.provider_actions_menu.add_command(label="退出登录", command=app.logout_provider)
+    app.provider_actions_menu.add_separator()
+    app.provider_actions_menu.add_command(label="从列表移除", command=app.toggle_hide_builtin)
+    app.provider_more_button = ttk.Menubutton(
+        actions, text="更多操作", menu=app.provider_actions_menu
+    )
+    app.provider_more_button.pack(side="left", padx=8)
+    ttk.Label(
+        actions, textvariable=app.form_status_var, style="Dirty.TLabel"
+    ).pack(side="right")
+    app._action_buttons = {
+        "save": app.save_provider_button,
+        "test": app.test_connection_button,
+    }
+    app._menu_actions = {
+        "delete_provider": (app.provider_actions_menu, 0),
+        "logout": (app.provider_actions_menu, 1),
+        "hide_builtin": (app.provider_actions_menu, 3),
+    }
+
+
+def _build_form(app, parent) -> None:
+    form = ttk.Frame(parent)
     form.pack(fill="x")
     form.columnconfigure(1, weight=1)
     fields = (
@@ -137,35 +158,11 @@ def build(app) -> None:
     app.key_status_label = ttk.Label(form, textvariable=app.key_status_var, anchor="w")
     app.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 2))
 
-    actions = ttk.Frame(right)
-    actions.pack(fill="x", pady=(10, 14))
-    app.save_provider_button = ttk.Button(actions, text="保存供应商", command=app.save_provider)
-    app.save_provider_button.pack(side="left")
-    app.test_connection_button = ttk.Button(actions, text="测试连接", command=app.test_connection)
-    app.test_connection_button.pack(side="left", padx=(8, 0))
-    app.provider_actions_menu = tk.Menu(app, tearoff=False)
-    app.provider_actions_menu.add_command(label="删除供应商", command=app.delete_provider)
-    app.provider_actions_menu.add_command(label="退出登录", command=app.logout_provider)
-    app.provider_actions_menu.add_separator()
-    app.provider_actions_menu.add_command(label="从列表移除", command=app.toggle_hide_builtin)
-    app.provider_more_button = ttk.Menubutton(
-        actions, text="更多操作", menu=app.provider_actions_menu
-    )
-    app.provider_more_button.pack(side="left", padx=8)
-    ttk.Label(
-        actions, textvariable=app.form_status_var, style="Dirty.TLabel"
-    ).pack(side="right")
-    app._action_buttons = {
-        "save": app.save_provider_button,
-        "test": app.test_connection_button,
-    }
-    app._menu_actions = {
-        "delete_provider": (app.provider_actions_menu, 0),
-        "logout": (app.provider_actions_menu, 1),
-        "hide_builtin": (app.provider_actions_menu, 3),
-    }
+    _setup_provider_actions(app, parent)
 
-    model_header = ttk.Frame(right)
+
+def _build_model_header(app, parent) -> None:
+    model_header = ttk.Frame(parent)
     model_header.pack(fill="x", pady=(2, 6))
     ttk.Label(model_header, text="模型", font=("TkDefaultFont", 11, "bold")).pack(side="left")
     app.set_default_button = ttk.Button(model_header, text="设为默认", command=app.set_default)
@@ -191,7 +188,9 @@ def build(app) -> None:
         "clear_models": (app.model_actions_menu, 3),
     })
 
-    model_filter = ttk.Frame(right)
+
+def _build_model_tree(app, parent) -> None:
+    model_filter = ttk.Frame(parent)
     model_filter.pack(fill="x", pady=(0, 6))
     ttk.Label(model_filter, text="筛选模型").pack(side="left")
     ttk.Label(
@@ -206,7 +205,7 @@ def build(app) -> None:
     app.model_filter_entry = ttk.Entry(model_filter, textvariable=app.model_filter_var)
     app.model_filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 4))
 
-    model_area = ttk.Frame(right)
+    model_area = ttk.Frame(parent)
     model_area.pack(fill="both", expand=True)
     app.model_tree = ttk.Treeview(
         model_area,
@@ -231,3 +230,26 @@ def build(app) -> None:
     app.model_tree.pack(side="left", fill="both", expand=True)
     # Double-click a model row to point pi at it.
     app.model_tree.bind("<Double-Button-1>", app._on_model_double_click)
+
+
+def build(app) -> None:
+    _build_toolbar(app)
+
+    # Reserve the status bar before the expanding pane. If packed after it, Tk can give
+    # the pane all remaining height and leave the status text completely unmapped.
+    ttk.Label(
+        app, textvariable=app.status_var, anchor="w", relief="sunken", padding=(8, 4)
+    ).pack(side="bottom", fill="x")
+
+    pane = ttk.PanedWindow(app, orient="horizontal")
+    pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+
+    left = ttk.Frame(pane, padding=(0, 4, 8, 4))
+    right = ttk.Frame(pane, padding=(8, 4, 0, 4))
+    pane.add(left, weight=2)
+    pane.add(right, weight=3)
+
+    _build_provider_pane(app, left)
+    _build_form(app, right)
+    _build_model_header(app, right)
+    _build_model_tree(app, right)
