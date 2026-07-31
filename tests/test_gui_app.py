@@ -6,6 +6,7 @@ they skip when tkinter cannot open one.
 """
 import json
 import tkinter as tk
+from tkinter import font as tkfont
 
 import pytest
 
@@ -72,6 +73,21 @@ def test_app_starts_and_lists_providers(app):
     # The fixture ships one custom provider (newapi) and two builtins (nvidia, deepseek).
     assert "newapi" in rows
     assert set(rows) >= {"newapi", "nvidia", "deepseek"}
+
+
+def test_app_uses_an_installed_cjk_font(app):
+    available = {family.casefold(): family for family in tkfont.families(app)}
+    expected = next(
+        (
+            available[name.casefold()]
+            for name in piswitch.theme.UI_FONT_CANDIDATES
+            if name.casefold() in available
+        ),
+        None,
+    )
+    if expected is not None:
+        actual = str(tkfont.nametofont("TkDefaultFont", root=app).actual("family"))
+        assert actual == expected
 
 
 def test_selecting_every_provider_row_loads_without_error(app):
@@ -301,7 +317,7 @@ def test_context_window_column_is_populated(app):
     rows = app.model_tree.get_children()
     # The fixture's builtin models carry no contextWindow, so they must read as unknown
     # rather than as a fabricated number.
-    assert app.model_tree.set(rows[0], "context") == "—"
+    assert app.model_tree.set(rows[0], "context") == "-"
 
 
 # --- ⑤ batch health check --------------------------------------------------

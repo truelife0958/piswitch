@@ -197,11 +197,11 @@ def test_format_context_window():
     assert core.format_context_window(1_048_576) == "1.0M"
     assert core.format_context_window(2_000_000) == "2.0M"
     assert core.format_context_window(512) == "512"
-    assert core.format_context_window(0) == "—"
-    assert core.format_context_window(-1) == "—"
-    assert core.format_context_window(None) == "—"
-    assert core.format_context_window(True) == "—"
-    assert core.format_context_window("128000") == "—"
+    assert core.format_context_window(0) == "-"
+    assert core.format_context_window(-1) == "-"
+    assert core.format_context_window(None) == "-"
+    assert core.format_context_window(True) == "-"
+    assert core.format_context_window("128000") == "-"
 
 
 # --- editor form validation ------------------------------------------------

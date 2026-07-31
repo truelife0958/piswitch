@@ -10,7 +10,7 @@ from .settings import apply_settings
 from .store import load_custom, load_models_store, load_settings
 
 USAGE = (
-    "piswitch — pi 自定义模型供应商管理工具\n"
+    "piswitch - pi 自定义模型供应商管理工具\n"
     "  piswitch                启动供应商管理 GUI\n"
     "  piswitch --help         显示帮助\n"
     "\n兼容命令:\n"

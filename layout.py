@@ -56,7 +56,7 @@ def _build_provider_pane(app, parent) -> None:
     ).pack(side="right", padx=(6, 0))
     ttk.Button(
         provider_filter,
-        text="×",
+        text="x",
         width=2,
         command=lambda: app.provider_filter_var.set(""),
     ).pack(side="right")
@@ -210,7 +210,7 @@ def _build_model_tree(app, parent) -> None:
     ).pack(side="right", padx=(6, 0))
     ttk.Button(
         model_filter,
-        text="×",
+        text="x",
         width=2,
         command=lambda: app.model_filter_var.set(""),
     ).pack(side="right")

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 
 COLORS = {
@@ -22,8 +22,46 @@ COLORS = {
     "stripe": "#f8fafb",
 }
 
+UI_FONT_CANDIDATES = (
+    "Noto Sans CJK SC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Source Han Sans CN",
+    "WenQuanYi Micro Hei",
+    "PingFang SC",
+)
+
+TK_UI_FONTS = (
+    "TkDefaultFont",
+    "TkTextFont",
+    "TkMenuFont",
+    "TkHeadingFont",
+    "TkCaptionFont",
+    "TkSmallCaptionFont",
+    "TkIconFont",
+    "TkTooltipFont",
+)
+
+
+def _configure_ui_fonts(root) -> str:
+    """Use one CJK-capable family instead of relying on per-glyph fallback."""
+    available = {family.casefold(): family for family in tkfont.families(root)}
+    family = next(
+        (available[name.casefold()] for name in UI_FONT_CANDIDATES if name.casefold() in available),
+        str(tkfont.nametofont("TkDefaultFont", root=root).actual("family")),
+    )
+    for name in TK_UI_FONTS:
+        try:
+            tkfont.nametofont(name, root=root).configure(family=family)
+        except tk.TclError:  # pragma: no cover - named fonts vary between Tk builds
+            continue
+    root.option_add("*Font", "TkDefaultFont")
+    root.option_add("*Menu.font", "TkMenuFont")
+    return family
+
 
 def apply(root) -> ttk.Style:
+    font_family = _configure_ui_fonts(root)
     style = ttk.Style(root)
     try:
         style.theme_use("clam")
@@ -37,6 +75,7 @@ def apply(root) -> ttk.Style:
     root.option_add("*Menu.activeBackground", colors["accent_soft"])
     root.option_add("*Menu.activeForeground", colors["text"])
 
+    style.configure(".", font="TkDefaultFont")
     style.configure("TFrame", background=colors["background"])
     style.configure("Toolbar.TFrame", background=colors["surface_alt"])
     style.configure("TLabel", background=colors["background"], foreground=colors["text"])
@@ -44,10 +83,10 @@ def apply(root) -> ttk.Style:
         "Title.TLabel",
         background=colors["surface_alt"],
         foreground=colors["text"],
-        font=("TkDefaultFont", 13, "bold"),
+        font=(font_family, 13, "bold"),
     )
     style.configure("Muted.TLabel", foreground=colors["muted"])
-    style.configure("Section.TLabel", font=("TkDefaultFont", 11, "bold"))
+    style.configure("Section.TLabel", font=(font_family, 11, "bold"))
     style.configure("Success.TLabel", foreground=colors["success"])
     style.configure("Warning.TLabel", foreground=colors["warning"])
     style.configure("Danger.TLabel", foreground=colors["danger"])
@@ -137,7 +176,7 @@ def apply(root) -> ttk.Style:
         bordercolor=colors["border"],
         relief="flat",
         padding=(6, 6),
-        font=("TkDefaultFont", 9, "bold"),
+        font=(font_family, 9, "bold"),
     )
     style.map("Treeview.Heading", background=[("active", "#e1e7ec")])
     style.configure("TCheckbutton", background=colors["background"], foreground=colors["text"])
@@ -147,9 +186,12 @@ def apply(root) -> ttk.Style:
 
 def configure_tree_tags(tree) -> None:
     colors = COLORS
+    font_family = str(
+        tkfont.nametofont("TkDefaultFont", root=tree).actual("family")
+    )
     tree.tag_configure("stripe", background=colors["stripe"])
     tree.tag_configure(
-        "default", foreground=colors["success"], font=("TkDefaultFont", 9, "bold")
+        "default", foreground=colors["success"], font=(font_family, 9, "bold")
     )
     tree.tag_configure("healthy", foreground=colors["success"])
     tree.tag_configure("unhealthy", foreground=colors["danger"])

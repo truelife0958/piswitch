@@ -178,11 +178,11 @@ def fetch_models_url(base: str) -> str:
 def format_context_window(value: Any) -> str:
     """Render a contextWindow compactly for the model list: 128000 -> '128K'.
 
-    Returns '—' for missing or nonsensical values rather than inventing a number, so a
+    Returns '-' for missing or nonsensical values rather than inventing a number, so a
     provider whose metadata piswitch never learned reads as unknown instead of as zero.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        return "—"
+        return "-"
     value = int(value)
     if value >= 1_000_000:
         return f"{value / 1_000_000:.1f}M"

@@ -69,7 +69,7 @@ class ProviderCrudMixin:
         self.api_var.set(values["api"])
         self.api_key_var.set(values["apiKey"])
         self._apply_action_states()
-        self.status_var.set(f"已套用模板 {values['name']}——确认 Base URL 与 Key 后保存")
+        self.status_var.set(f"已套用模板 {values['name']}: 确认 Base URL 与 Key 后保存")
 
     def save_provider(self) -> bool:
         provider = self.provider_var.get().strip()
