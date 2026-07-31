@@ -50,15 +50,22 @@ class App(
         style.configure("TButton", width=0, padding=(9, 4))
         style.configure("Dirty.TLabel", foreground="#9a5a00")
 
+        self._declare_vars()
+        self._build_ui()
+        self._bind_events()
+        self.after(100, self._poll_network_results)
+        self.refresh_providers()
+
+    def _declare_vars(self) -> None:
+        """所有 Tk 变量与内部状态字段。只声明，不绑定、不读盘。"""
         self.current_provider: str | None = None
-        # Facts about the current selection that action-button state derives from.
         self._current_is_builtin = False
         self._current_has_oauth = False
         self._current_is_hidden = False
         self.provider_var = tk.StringVar()
         self.name_var = tk.StringVar()
-        self.base_url_var = tk.StringVar(value="https://")
-        self.api_var = tk.StringVar(value=core.API_TYPES[0])
+        self.base_url_var = tk.StringVar()
+        self.api_var = tk.StringVar()
         self.api_key_var = tk.StringVar()
         self.key_status_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)
@@ -79,7 +86,8 @@ class App(
         self._form_snapshot: tuple[str, ...] = ()
         self._form_dirty = False
 
-        self._build_ui()
+    def _bind_events(self) -> None:
+        """快捷键、trace 回调、关窗协议。必须在 _build_ui 之后调用。"""
         self.bind("<Control-n>", lambda _event: self.new_provider())
         self.bind("<Control-s>", lambda _event: self.save_provider())
         self.bind("<Control-f>", lambda _event: self.provider_filter_entry.focus_set())
@@ -94,8 +102,6 @@ class App(
         self.model_filter_var.trace_add("write", self._on_model_filter_changed)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._tracking_form = True
-        self.after(100, self._poll_network_results)
-        self.refresh_providers()
 
     def _build_ui(self) -> None:
         layout.build(self)

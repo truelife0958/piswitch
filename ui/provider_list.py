@@ -17,6 +17,37 @@ class ProviderListMixin:
     _current_config、_tracking_form、_confirm_form_transition、_restore_provider_selection、
     _toggle_key_visibility、_mark_form_clean、_refresh_models、_reset_new_provider_form。"""
 
+    def _fill_provider_form(self, config: dict, *, provider: str,
+                            kind: str, auth: dict, builtin: bool) -> None:
+        """程序化回填表单。全程压住 _tracking_form，否则这些赋值会被
+        _on_form_changed 当成用户编辑，一选中供应商就显示「未保存」。"""
+        self._tracking_form = False
+        try:
+            self.provider_var.set(provider)
+            self.name_var.set(config.get("name") or provider)
+            self.base_url_var.set(config.get("baseUrl", ""))
+            self.api_var.set(config.get("api", core.API_TYPES[0]))
+            if kind == "oauth":
+                # OAuth access tokens are extension-managed; show read-only status instead.
+                self.api_key_var.set(
+                    OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)")
+                )
+            elif kind == "api_key":
+                auth_entry = auth.get(provider)
+                auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
+                self.api_key_var.set(auth_key or config.get("apiKey", ""))
+            else:
+                self.api_key_var.set(config.get("apiKey", ""))
+
+            # Builtin providers are read-only: label missing store-owned values clearly.
+            if builtin:
+                self.name_var.set(config.get("name") or f"{provider} (内置)")
+                self.base_url_var.set(config.get("baseUrl") or "(内置)")
+            self.show_key_var.set(False)
+            self._toggle_key_visibility()
+        finally:
+            self._tracking_form = True
+
     def _render_provider_rows(self, select: str | None = None) -> None:
         query = self.provider_filter_var.get()
         self.provider_tree.delete(*self.provider_tree.get_children())
@@ -98,31 +129,7 @@ class ProviderListMixin:
         )
         self._current_is_hidden = builtin and provider in snap.hidden
 
-        self._tracking_form = False
-        try:
-            self.provider_var.set(provider)
-            self.name_var.set(config.get("name") or provider)
-            self.base_url_var.set(config.get("baseUrl", ""))
-            self.api_var.set(config.get("api", core.API_TYPES[0]))
-            if kind == "oauth":
-                # OAuth access tokens are extension-managed; show read-only status instead.
-                self.api_key_var.set(
-                    OAUTH_LABELS.get(core.auth_login_state(provider, auth), "(OAuth)")
-                )
-            elif kind == "api_key":
-                auth_key = auth_entry.get("key") if isinstance(auth_entry, dict) else ""
-                self.api_key_var.set(auth_key or config.get("apiKey", ""))
-            else:
-                self.api_key_var.set(config.get("apiKey", ""))
-
-            # Builtin providers are read-only: label missing store-owned values clearly.
-            if builtin:
-                self.name_var.set(config.get("name") or f"{provider} (内置)")
-                self.base_url_var.set(config.get("baseUrl") or "(内置)")
-            self.show_key_var.set(False)
-            self._toggle_key_visibility()
-        finally:
-            self._tracking_form = True
+        self._fill_provider_form(config, provider=provider, kind=kind, auth=auth, builtin=builtin)
 
         field_state = "disabled" if builtin else "normal"
         self.provider_entry.configure(state=field_state)

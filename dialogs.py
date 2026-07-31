@@ -14,6 +14,86 @@ from tkinter import filedialog, messagebox, ttk
 import core
 
 
+class _RemoteSelection:
+    """勾选状态与 Shift 框选锚点。抽出来是因为七个闭包共享它，
+    平铺在对话框函数里读不出谁在改什么。
+
+    真相是 `selected` 这个 id 集合，树里第 0 列的 ☑/☐ 只是它的显示。
+    两者必须一起改，否则会出现勾了却导不进来的行。"""
+
+    def __init__(self, tree, selection_text, total: int):
+        self.tree = tree
+        self.selection_text = selection_text   # 原 selection_text StringVar
+        self.total = total
+        self.selected: set[str] = set()        # 原 selected 集合
+        self.anchor: str | None = None         # 原 last_clicked["iid"]
+
+    def checked_ids(self) -> list[str]:
+        return [
+            self.tree.item(item, "values")[1]
+            for item in self.tree.get_children()
+            if item in self.selected
+        ]
+
+    def update_count(self) -> None:
+        self.selection_text.set(f"发现 {self.total} 个模型，已选择 {len(self.selected)} 个")
+
+    def set_checked(self, item: str, checked: bool) -> None:
+        values = list(self.tree.item(item, "values"))
+        values[0] = "☑" if checked else "☐"
+        self.tree.item(item, values=values)
+        if checked:
+            self.selected.add(item)
+        else:
+            self.selected.discard(item)
+
+    def toggle(self, item: str) -> None:
+        self.set_checked(item, item not in self.selected)
+        self.tree.focus_set()
+        self.tree.focus(item)
+        self.tree.selection_set(item)
+        self.update_count()
+
+    def on_click(self, event) -> str | None:
+        item = self.tree.identify_row(event.y)
+        if not item or self.tree.identify_region(event.x, event.y) not in {"cell", "tree"}:
+            return None
+        # Shift+click = marquee toggle over the range from the anchor to this row,
+        # unifying the whole span to whatever state this click produces.
+        if event.state & 0x0001 and self.anchor is not None:
+            iids = self.tree.get_children()
+            for row_iid, target in core.range_toggle_targets(
+                iids, self.anchor, item, lambda i: i in self.selected
+            ):
+                self.set_checked(row_iid, target)
+            self.anchor = item
+            self.tree.focus_set()
+            self.tree.focus(item)
+            self.tree.selection_set(item)
+            self.update_count()
+            return "break"
+        self.toggle(item)
+        self.anchor = item
+        return "break"
+
+    def on_space(self, _event) -> str:
+        item = self.tree.focus()
+        if item:
+            self.toggle(item)
+        return "break"
+
+    def select_all(self) -> None:
+        for item in self.tree.get_children():
+            self.set_checked(item, True)
+        self.update_count()
+
+    def clear(self) -> None:
+        for item in self.tree.get_children():
+            self.set_checked(item, False)
+        self.tree.selection_remove(*self.tree.selection())
+        self.update_count()
+
+
 def show_remote_models(app, models: list[dict], provider: str) -> None:
     if not models:
         app.status_var.set("连接成功，但接口没有返回模型")
@@ -25,7 +105,6 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
     win.geometry("620x440")
     win.transient(app)
 
-    selected: set[str] = set()
     selection_text = tk.StringVar(value=f"发现 {len(models)} 个模型，已选择 0 个")
     ttk.Label(win, textvariable=selection_text, padding=(10, 10, 10, 6)).pack(anchor="w")
     ttk.Label(win, text="提示：单击或空格切换单行勾选；Shift+单击框选一片。", padding=(10, 0, 10, 4)).pack(anchor="w")
@@ -50,75 +129,12 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
     for index, model in enumerate(models):
         tree.insert("", "end", iid=str(index), values=("☐", model["id"], model["name"]))
 
-    def update_selection_text() -> None:
-        selection_text.set(f"发现 {len(models)} 个模型，已选择 {len(selected)} 个")
-
-    def set_checked(item: str, checked: bool) -> None:
-        values = list(tree.item(item, "values"))
-        values[0] = "☑" if checked else "☐"
-        tree.item(item, values=values)
-        if checked:
-            selected.add(item)
-        else:
-            selected.discard(item)
-
-    last_clicked = {"iid": None}  # anchor for shift-click range toggle
-
-    def toggle_item(item: str) -> None:
-        set_checked(item, item not in selected)
-        tree.focus_set()
-        tree.focus(item)
-        tree.selection_set(item)
-        update_selection_text()
-
-    def on_tree_click(event) -> str | None:
-        item = tree.identify_row(event.y)
-        if not item or tree.identify_region(event.x, event.y) not in {"cell", "tree"}:
-            return None
-        # Shift+click = marquee toggle over the range from the anchor to this row,
-        # unifying the whole span to whatever state this click produces.
-        if event.state & 0x0001 and last_clicked["iid"] is not None:
-            iids = tree.get_children()
-            for row_iid, target in core.range_toggle_targets(
-                iids, last_clicked["iid"], item, lambda i: i in selected
-            ):
-                set_checked(row_iid, target)
-            last_clicked["iid"] = item
-            tree.focus_set()
-            tree.focus(item)
-            tree.selection_set(item)
-            update_selection_text()
-            return "break"
-        toggle_item(item)
-        last_clicked["iid"] = item
-        return "break"
-
-    def on_tree_space(_event) -> str:
-        item = tree.focus()
-        if item:
-            toggle_item(item)
-        return "break"
-
-    def select_all() -> None:
-        for item in tree.get_children():
-            set_checked(item, True)
-        update_selection_text()
-
-    def clear_selection() -> None:
-        for item in tree.get_children():
-            set_checked(item, False)
-        tree.selection_remove(*tree.selection())
-        update_selection_text()
-
-    tree.bind("<Button-1>", on_tree_click)
-    tree.bind("<space>", on_tree_space)
+    sel = _RemoteSelection(tree, selection_text, len(models))
+    tree.bind("<Button-1>", sel.on_click)
+    tree.bind("<space>", sel.on_space)
 
     def import_selected() -> None:
-        selected_ids = [
-            tree.item(item, "values")[1]
-            for item in tree.get_children()
-            if item in selected
-        ]
+        selected_ids = sel.checked_ids()
         if not selected_ids:
             messagebox.showinfo("导入模型", "请至少选择一个模型。", parent=win)
             return
@@ -153,8 +169,8 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
 
     buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
     buttons.pack(fill="x")
-    ttk.Button(buttons, text="全选", command=select_all).pack(side="left")
-    ttk.Button(buttons, text="清空", command=clear_selection).pack(side="left", padx=6)
+    ttk.Button(buttons, text="全选", command=sel.select_all).pack(side="left")
+    ttk.Button(buttons, text="清空", command=sel.clear).pack(side="left", padx=6)
     ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
     ttk.Button(buttons, text="导入所选", command=import_selected).pack(side="right", padx=8)
 
