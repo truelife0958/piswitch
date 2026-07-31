@@ -110,3 +110,10 @@ bash -n bin/piswitch install.sh
 python3 smoke_gui.py          # 有显示器时
 xvfb-run -a python3 smoke_gui.py   # 无显示器时
 ```
+
+`audit_layout.py` 渲染真实窗口后测量各控件的实际几何，报告用户会感知为"布局坏了"的问题：列宽之和超出可见宽度、控件零尺寸或未映射、自然尺寸超过窗口 minsize、文字溢出标签或按钮。改动 `layout.py` 后跑一次：
+
+```bash
+python3 audit_layout.py
+xvfb-run -a python3 audit_layout.py   # 无显示器时
+```
