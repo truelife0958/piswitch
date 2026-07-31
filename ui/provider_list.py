@@ -14,7 +14,7 @@ class ProviderListMixin:
     _action_buttons、_menu_actions、provider_actions_menu、provider_more_button、
     model_more_button、check_all_button、_provider_records、_health、_network_busy、
     current_provider、_current_is_builtin、_current_has_oauth、_current_is_hidden、
-    _current_config、_tracking_form、_confirm_form_transition、_restore_provider_selection、
+    _current_config、_tracking_form、confirm_form_transition、_restore_provider_selection、
     _toggle_key_visibility、_mark_form_clean、_refresh_models、_reset_new_provider_form。"""
 
     def _fill_provider_form(self, config: dict, *, provider: str,
@@ -103,7 +103,7 @@ class ProviderListMixin:
             target = selection[0]
             if target == self.current_provider:
                 return
-            if not self._confirm_form_transition():
+            if not self.confirm_form_transition():
                 self._restore_provider_selection()
                 return
             self._load_provider(target)

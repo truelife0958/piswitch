@@ -4,6 +4,7 @@ from __future__ import annotations
 from tkinter import messagebox
 
 import core
+import config_dialogs
 import dialogs
 from core import mutation_timestamp
 
@@ -14,7 +15,7 @@ class ProviderCrudMixin:
     model_count_var、status_var、show_hidden、current_provider、_current_is_builtin、
     _current_has_oauth、_current_is_hidden、_current_config、_tracking_form、
     _toggle_key_visibility、_apply_action_states、_mark_form_clean、
-    _confirm_form_transition、refresh_providers。"""
+    confirm_form_transition、refresh_providers。"""
 
     def _reset_new_provider_form(self) -> None:
         self.current_provider = None
@@ -50,14 +51,14 @@ class ProviderCrudMixin:
         self.status_var.set("填写供应商信息后保存")
 
     def new_provider(self) -> bool:
-        if not self._confirm_form_transition():
+        if not self.confirm_form_transition():
             return False
         self._reset_new_provider_form()
         return True
 
     def new_from_template(self) -> None:
-        if self._confirm_form_transition():
-            dialogs.choose_template(self)
+        if self.confirm_form_transition():
+            config_dialogs.choose_template(self)
 
     def apply_template_values(self, values: dict) -> None:
         """Seed the form from a template, as a brand-new unsaved provider."""
@@ -103,7 +104,11 @@ class ProviderCrudMixin:
         if not provider:
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("无法删除", f"{provider} 是内置供应商，不能删除。\n可用“更多操作 → 从列表移除”把它隐藏，或用“退出登录”移除其凭据。")
+            messagebox.showinfo(
+                "无法删除",
+                f"{provider} 是内置供应商，不能删除。\n"
+                "可用“更多操作 → 从列表移除”把它隐藏，或用“退出登录”移除其凭据。",
+            )
             return
         prompt = f"删除 {provider} 及其模型和 API key？"
         if core.is_default_provider(provider):
@@ -124,7 +129,7 @@ class ProviderCrudMixin:
         self.status_var.set(f"已删除供应商 {provider}")
 
     def logout_provider(self) -> None:
-        if not self._confirm_form_transition():
+        if not self.confirm_form_transition():
             return
         provider = self.current_provider
         if not provider:
@@ -155,7 +160,7 @@ class ProviderCrudMixin:
         self.status_var.set(f"已退出登录 {provider}")
 
     def toggle_hide_builtin(self) -> None:
-        """Hide or unhide a builtin provider from the piswitch list (models-store is left untouched)."""
+        """隐藏或恢复内置供应商，不修改 models-store.json。"""
         provider = self.current_provider
         if not provider:
             return
@@ -176,11 +181,11 @@ class ProviderCrudMixin:
             )
 
     def export_config(self) -> None:
-        dialogs.export_config(self)
+        config_dialogs.export_config(self)
 
     def import_config(self) -> None:
-        if self._confirm_form_transition():
-            dialogs.import_config(self)
+        if self.confirm_form_transition():
+            config_dialogs.import_config(self)
 
     def open_backup_restore(self) -> None:
         dialogs.open_backup_restore(self)

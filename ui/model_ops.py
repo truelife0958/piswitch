@@ -86,7 +86,7 @@ class ModelOpsMixin:
         self._open_model_editor(provider, model)
 
     def _open_model_editor(self, provider: str, model: dict) -> None:
-        dialogs.open_model_editor(self, provider, model)
+        self._model_editor = dialogs.open_model_editor(self, provider, model)
 
     def set_default(self) -> None:
         """Point pi at the selected model. This is what the tool is named after."""
@@ -111,7 +111,7 @@ class ModelOpsMixin:
         except (OSError, ValueError) as exc:
             messagebox.showerror("设为默认失败", str(exc))
             return
-        self._refresh_provider_models(provider)
+        self.refresh_provider_models(provider)
         self.status_var.set(f"pi 默认模型 → {provider}/{model_id}")
 
     def add_models(self) -> None:
@@ -139,7 +139,7 @@ class ModelOpsMixin:
         except (OSError, ValueError) as exc:
             messagebox.showerror("增加失败", str(exc))
             return
-        self._refresh_provider_models(provider)
+        self.refresh_provider_models(provider)
         self.status_var.set(f"已更新 {provider} 的模型")
 
     def delete_model(self) -> None:
@@ -179,7 +179,7 @@ class ModelOpsMixin:
         except OSError as exc:
             messagebox.showerror("删除失败", str(exc))
             return
-        self._refresh_provider_models(provider)
+        self.refresh_provider_models(provider)
         self.status_var.set(f"已删除 {count} 个模型")
 
     def clear_models(self) -> None:
@@ -215,10 +215,10 @@ class ModelOpsMixin:
         except OSError as exc:
             messagebox.showerror("清空失败", str(exc))
             return
-        self._refresh_provider_models(provider)
+        self.refresh_provider_models(provider)
         self.status_var.set(f"已清空 {removed} 个模型")
 
-    def _refresh_provider_models(self, provider: str) -> None:
+    def refresh_provider_models(self, provider: str) -> None:
         """Reload model rows and provider summaries without replacing form edits."""
         if provider != self.current_provider:
             # A fetch/editor started on A may finish after the user switched to B.

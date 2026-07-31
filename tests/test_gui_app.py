@@ -9,8 +9,8 @@ import tkinter as tk
 
 import pytest
 
+import config_dialogs
 import core
-import dialogs
 import piswitch
 
 
@@ -513,7 +513,7 @@ def test_export_button_writes_a_secretless_file(app, monkeypatch, tmp_path):
     core.save_custom_provider("secret", "Secret", "https://s.example/v1",
                               "openai-completions", "sk-do-not-leak", ts="20260730-160000")
     target = tmp_path / "out.json"
-    monkeypatch.setattr(dialogs.filedialog, "asksaveasfilename", lambda **k: str(target))
+    monkeypatch.setattr(config_dialogs.filedialog, "asksaveasfilename", lambda **k: str(target))
     infos = []
     monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda t, m, **k: infos.append(m))
 
@@ -530,7 +530,7 @@ def test_export_button_writes_a_secretless_file(app, monkeypatch, tmp_path):
 
 def test_export_cancelled_writes_nothing(app, monkeypatch, tmp_path):
     target = tmp_path / "should-not-exist.json"
-    monkeypatch.setattr(dialogs.filedialog, "asksaveasfilename", lambda **k: "")
+    monkeypatch.setattr(config_dialogs.filedialog, "asksaveasfilename", lambda **k: "")
     written = []
     monkeypatch.setattr(core, "write_json_atomic", lambda *a, **k: written.append(a))
 
@@ -549,7 +549,7 @@ def test_import_button_adds_providers_and_refreshes(app, monkeypatch, tmp_path):
             "api": "openai-completions", "models": [{"id": "m1", "name": "m1"}],
         }},
     }), encoding="utf-8")
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
     monkeypatch.setattr(piswitch.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
 
@@ -568,7 +568,7 @@ def test_import_declining_overwrite_keeps_local_config(app, monkeypatch, tmp_pat
             "name": "Overwritten", "baseUrl": "https://x/v1", "api": "openai-completions",
         }},
     }), encoding="utf-8")
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
     # askyesnocancel -> False means "only import new ones"
     monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: False)
     monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
@@ -584,7 +584,7 @@ def test_import_cancel_on_the_clash_prompt_does_nothing(app, monkeypatch, tmp_pa
         "kind": "piswitch-providers", "version": 1,
         "providers": {"newapi": {"baseUrl": "https://x/v1", "api": "openai-completions"}},
     }), encoding="utf-8")
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
     monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: None)
     called = []
     monkeypatch.setattr(core, "import_providers",
@@ -598,7 +598,7 @@ def test_import_cancel_on_the_clash_prompt_does_nothing(app, monkeypatch, tmp_pa
 def test_import_reports_a_corrupt_file(app, monkeypatch, tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("{ not json", encoding="utf-8")
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(bad))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(bad))
     errors = []
     monkeypatch.setattr(piswitch.messagebox, "showerror", lambda t, m, **k: errors.append(m))
 
@@ -610,7 +610,7 @@ def test_import_reports_a_corrupt_file(app, monkeypatch, tmp_path):
 def test_import_rejects_a_foreign_json_file(app, monkeypatch, tmp_path):
     foreign = tmp_path / "other.json"
     foreign.write_text(json.dumps({"hello": "world"}), encoding="utf-8")
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(foreign))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(foreign))
     errors = []
     monkeypatch.setattr(piswitch.messagebox, "showerror", lambda t, m, **k: errors.append(m))
 
@@ -621,8 +621,8 @@ def test_import_rejects_a_foreign_json_file(app, monkeypatch, tmp_path):
 
 def test_export_import_roundtrip_through_the_gui(app, monkeypatch, tmp_path):
     bundle = tmp_path / "trip.json"
-    monkeypatch.setattr(dialogs.filedialog, "asksaveasfilename", lambda **k: str(bundle))
-    monkeypatch.setattr(dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(config_dialogs.filedialog, "asksaveasfilename", lambda **k: str(bundle))
+    monkeypatch.setattr(config_dialogs.filedialog, "askopenfilename", lambda **k: str(bundle))
     monkeypatch.setattr(piswitch.messagebox, "showinfo", lambda *a, **k: None)
     monkeypatch.setattr(piswitch.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(piswitch.messagebox, "askyesnocancel", lambda *a, **k: True)
@@ -803,7 +803,7 @@ def test_late_model_refresh_never_replaces_another_providers_rows(app):
     before = [app.model_tree.set(row, "id") for row in app.model_tree.get_children()]
     core.add_provider_models("newapi", "late-model", ts="20260731-100001")
 
-    app._refresh_provider_models("newapi")
+    app.refresh_provider_models("newapi")
 
     assert app.current_provider == "nvidia"
     assert [app.model_tree.set(row, "id") for row in app.model_tree.get_children()] == before

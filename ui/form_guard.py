@@ -36,7 +36,7 @@ class FormGuardMixin:
         self.form_status_var.set("")
         self.title("piswitch")
 
-    def _confirm_form_transition(self) -> bool:
+    def confirm_form_transition(self) -> bool:
         """Offer save/discard/cancel before an action would replace the form."""
         if not self._form_dirty:
             return True
@@ -61,9 +61,9 @@ class FormGuardMixin:
             self.provider_tree.focus(self.current_provider)
 
     def _on_close(self) -> None:
-        if self._confirm_form_transition():
+        if self.confirm_form_transition():
             self.destroy()
 
     def request_refresh(self) -> None:
-        if self._confirm_form_transition():
+        if self.confirm_form_transition():
             self.refresh_providers()

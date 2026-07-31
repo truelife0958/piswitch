@@ -64,8 +64,8 @@ class App(
         self._current_is_hidden = False
         self.provider_var = tk.StringVar()
         self.name_var = tk.StringVar()
-        self.base_url_var = tk.StringVar()
-        self.api_var = tk.StringVar()
+        self.base_url_var = tk.StringVar(value="https://")
+        self.api_var = tk.StringVar(value=core.API_TYPES[0])
         self.api_key_var = tk.StringVar()
         self.key_status_var = tk.StringVar()
         self.show_key_var = tk.BooleanVar(value=False)

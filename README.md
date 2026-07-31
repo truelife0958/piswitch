@@ -1,123 +1,155 @@
 # piswitch
 
-piswitch 是一个轻量的 pi 模型供应商管理工具，用于维护 `~/.pi/agent/models.json` 和 `auth.json` 中的自定义 provider。
+piswitch 是一个轻量的 pi 模型供应商管理工具。它直接管理 pi 的供应商、模型、凭据和默认模型配置，同时提供桌面 GUI 与兼容命令行入口。
 
-主要功能：
+## 功能
 
-- 查看自定义模型供应商
-- 新增、编辑和删除供应商
-- 配置 Base URL、API 类型和 API Key
-- 为供应商增加或删除模型
-- 一键把 pi 的默认供应商/模型切换到选中的模型
-- 编辑模型元数据（上下文窗口、最大输出、价格、是否支持推理）
-- 测试 API 连接：先列模型，再真发一次最小对话
-- 批量健康检查所有供应商，列表内显示 ✓/✗ 与延迟
-- 即时筛选供应商和模型，多关键词不区分大小写
-- `$ENV_VAR` 形式的 Key 会就地提示变量是否已设置
-- 切换供应商、刷新或退出前保护未保存的表单修改
-- 从 `/v1/models` 批量导入模型，并尽量带上真实元数据
-- 导出/导入供应商配置（不含 API Key）
-- 浏览并恢复修改前的配置快照
-- 删除当前默认供应商或模型时主动警告
-- 修改前自动备份，JSON 配置原子写入
+- 新增、编辑、删除和筛选自定义供应商
+- 从内置模板创建 OpenAI、Anthropic、Gemini、DeepSeek、Ollama 等供应商
+- 从 `/v1/models` 拉取并批量导入模型，也可手工维护模型
+- 编辑上下文窗口、最大输出、价格和推理能力等模型元数据
+- 把选中模型设为 pi 的默认模型
+- 测试模型列表接口，并对支持的 API 类型发送最小对话请求
+- 并发检查全部供应商的可用性与延迟
+- 导入、导出不含明文 API Key 的供应商配置
+- 自动备份、原子写入并支持从历史快照恢复
+- 在切换供应商、刷新或退出前保护未保存修改
 
-## 运行
+## 环境要求
 
-需要 Python 3 和 tkinter：
+- Python 3.10 或更高版本
+- tkinter
+- Linux 桌面、WSLg，或其他可用的 X/Wayland 图形环境
+
+Ubuntu/WSL 缺少 tkinter 时可安装：
+
+```bash
+sudo apt install python3-tk
+```
+
+项目没有第三方 Python 运行时依赖。
+
+## 直接运行
+
+在项目目录执行：
 
 ```bash
 ./bin/piswitch
 ```
 
-安装用户级命令和桌面入口：
+查看命令行帮助：
+
+```bash
+./bin/piswitch --help
+```
+
+## 安装
+
+安装当前用户的 `piswitch` 命令、图标和桌面入口：
 
 ```bash
 ./install.sh
 piswitch
 ```
 
-在 WSL 上，`install.sh` 会额外用 `sudo` 往 `/usr/share/applications` 装一份桌面入口——WSLg 只扫系统目录，放在 `~/.local/share/applications` 的入口不会出现在 Windows 开始菜单。设 `PISWITCH_NO_SYSTEM_ENTRY=1` 可跳过这步和它需要的 sudo。
+安装脚本会把启动命令链接到 `~/.local/bin/piswitch`。请确认 `~/.local/bin` 已加入 `PATH`。
 
-WSL 环境需要启用 WSLg 或配置可用的 X server。
-
-## 命令行
-
-带参数运行时不启动图形界面，适合图形环境不可用的场合：
+在 WSLg 中，Windows 开始菜单只扫描系统桌面入口，因此安装脚本还会通过 `sudo` 写入 `/usr/share/applications`。不需要开始菜单入口时可跳过：
 
 ```bash
-piswitch list             # 列出预设
-piswitch use <名称>        # 切换到预设
-piswitch model <query>     # 模糊匹配并切换模型，多个候选会列出来
+PISWITCH_NO_SYSTEM_ENTRY=1 ./install.sh
 ```
 
-## 使用
-
-左侧显示所有自定义供应商。选择供应商后，可在右侧修改显示名称、Base URL、API 类型和 API Key。
-
-供应商列表和模型列表上方都可即时筛选；输入多个关键词时需全部匹配。编辑供应商信息后，窗口标题和操作区会显示“未保存”。此时切换供应商、刷新、新建或退出，可选择先保存、放弃修改或取消操作。
+## 基本使用
 
 新增供应商：
 
-1. 点击“新增”。
-2. 填写 Provider ID、名称、Base URL 和 API 类型。
+1. 点击“新增”或“从模板”。
+2. 填写 Provider ID、名称、Base URL、API 类型和 API Key。
 3. 点击“保存供应商”。
-4. 点击“拉取模型”从服务端多选导入，或点击“增加模型”手工输入 Model ID。
+4. 点击“拉取模型”批量导入，或在“管理”菜单中手工增加模型。
+5. 选择模型并点击“设为默认”。
 
-“测试连接”会使用当前表单中的 Base URL 和 API Key 请求模型接口，然后对选中的模型（未选中时取列表第一个）真发一次 1-token 对话。只列模型是不够的：不少第三方代理能正常返回模型列表，却在真实对话时因为 `prompt_cache_key` 之类的参数返回 400。`openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 支持对话探测；其余类型只验证模型接口。网络请求在后台运行，不会阻塞窗口。使用 `$ENV_VAR` Key 时，需要先在启动 piswitch 的环境中设置对应变量——API Key 输入框下方会直接提示该变量是否已设置。
+API Key 可以填写明文，也可以使用 `$ENV_VAR` 引用。推荐使用环境变量；界面会显示对应变量是否已设置。
 
-顶部“检查全部”会并发检查列表中所有供应商，在“状态”列显示 ✓ 与延迟或 ✗。这一步只请求 `/v1/models`，不产生对话费用；需要验证真实对话时，请对单个供应商用“测试连接”。检查结果只用于显示，不会写入任何配置。
+“测试连接”先请求模型列表，再对支持的 API 类型发送一次 1-token 对话，用于发现只能列模型但无法真实对话的代理配置。顶部“检查全部”只请求模型列表，不产生对话费用。
 
-选中模型后点“设为默认”（或双击“默认”列）即可把 pi 的 `defaultProvider` / `defaultModel` 指向它，当前默认项在两个列表中以 ★ 标记。内置供应商虽然不可编辑，但同样可以设为默认。
+双击模型行可编辑模型元数据；双击“默认”列可直接切换默认模型。内置供应商不可修改，但可以设为默认、隐藏或移除本地凭据。
 
-双击模型行可编辑其元数据：上下文窗口、最大输出 tokens、每百万 tokens 的输入/输出价格、是否支持推理。留空表示未知，不会被写成 0。从 `/v1/models` 导入或手工新增模型时，piswitch 会先尝试沿用 `models-store.json` 中同名模型的元数据，再采用接口自身返回的 `context_length` / `pricing` 等字段，都拿不到时才回退到占位默认值。
+## 命令行
 
-“拉取模型”窗口默认不选择任何模型。可点击单行或聚焦后按空格切换勾选状态，也可使用“全选”和“清空”批量操作；Shift+点击可从上次点击行到当前行之间整段框选切换，整段统一进入或退出勾选状态。
+带参数运行不会启动 GUI：
 
-顶部“更多”菜单中的“导出配置”会把全部自定义供应商写成一个 JSON 文件。**导出文件不含 API Key**：字面量 Key 会被剔除，`$ENV_VAR` 形式的引用会保留（它只是变量名，不是密钥本身），因此该文件可以安全地提交到 git 或发给同事，导入方自行设置对应环境变量即可。“导入配置”会读取这样的文件；已存在的供应商可选择覆盖或跳过，内置供应商永远不会被覆盖，`auth.json` 全程不被修改。
+```bash
+piswitch list             # 列出兼容旧版预设
+piswitch use <名称>       # 切换到指定预设
+piswitch model <query>    # 模糊匹配 provider/model 并切换
+```
 
-保存第三方 `openai-completions` 供应商时，piswitch 会在 `compat` 中补充安全默认值：启用会话亲和请求头，并关闭长缓存参数。已有 `compat` 显式设置优先，不会被默认值覆盖。
+`model` 匹配多个结果时只会列出候选，不会修改配置。
 
-在补全安全默认值之前创建的供应商（即 `compat` 块缺失或不完整的旧条目），会在每次载入时被自动补齐缺失的字段，并随下次任意写入操作原子持久化。这一迁移是幂等的，且不会覆盖用户显式设置值——主要目的是让旧预设免受第三方代理拒绝 `prompt_cache_key` 等参数导致的 400 错误。
+## 配置与数据安全
 
-删除供应商会同时删除该供应商的模型配置和 `auth.json` 中对应的 API Key。内置供应商来自 `models-store.json`，本工具不会修改或删除它们。
+piswitch 读取或修改以下 pi 配置：
 
-删除 pi 当前默认的供应商或模型时会显示额外警告。应先在 pi 中切换默认模型，再执行删除。
+```text
+~/.pi/agent/settings.json
+~/.pi/agent/models.json
+~/.pi/agent/auth.json
+~/.pi/agent/models-store.json  # 只读
+```
 
-## 数据安全
-
-工具修改：
-
-- `~/.pi/agent/models.json`
-- `~/.pi/agent/auth.json`
-
-每次修改前，会把现有的 `settings.json`、`models.json` 和 `auth.json` 复制到：
+每次写入前，现有的 `settings.json`、`models.json` 和 `auth.json` 会备份到：
 
 ```text
 ~/.local/share/piswitch/backups/switch-<时间戳>/
 ```
 
-工具自动保留最近 20 个快照。点击顶部“更多 → 恢复备份”可选择历史快照；恢复前也会保存当前状态，因此可以再次回退。
+默认保留最近 20 个快照。恢复前也会备份当前状态，因此恢复操作仍可回退。
 
-API Key 支持 `$ENV_VAR` 写法并原样保存。开发和测试时，可使用 `PI_AGENT_DIR` 与 `PISWITCH_DATA_DIR` 覆盖数据目录。
+导出文件不会包含明文 API Key；`$ENV_VAR` 形式的变量引用会保留。开发或测试时可覆盖数据目录，避免接触真实配置：
 
-## 验证
+```bash
+PI_AGENT_DIR=/tmp/piswitch-agent \
+PISWITCH_DATA_DIR=/tmp/piswitch-data \
+./bin/piswitch
+```
+
+## 项目结构
+
+```text
+piswitch.py          GUI 入口与应用初始化
+core/                不依赖 tkinter 的配置、备份、探测和切换逻辑
+ui/                  供应商、模型、网络和表单行为
+layout.py            主窗口控件布局
+dialogs.py           模型导入、备份恢复和模型编辑对话框
+config_dialogs.py    配置导入、导出和模板对话框
+tests/               单元测试与 GUI 回归测试
+smoke_gui.py         真实窗口冒烟检查
+audit_layout.py      控件尺寸与布局审计
+```
+
+## 开发验证
+
+完整的非交互检查：
 
 ```bash
 python3 -m pytest -q
-python3 -m py_compile piswitch.py dialogs.py layout.py audit_layout.py smoke_gui.py core/*.py
+python3 -m py_compile piswitch.py dialogs.py config_dialogs.py layout.py \
+  audit_layout.py smoke_gui.py ui/*.py core/*.py
 bash -n bin/piswitch install.sh
 ```
 
-`smoke_gui.py` 会把真实配置复制到临时目录，构造一次窗口并走完所有供应商加载与对话框路径，用于快速排查 GUI 回归：
+GUI 检查需要可用显示器：
 
 ```bash
-python3 smoke_gui.py          # 有显示器时
-xvfb-run -a python3 smoke_gui.py   # 无显示器时
+python3 smoke_gui.py
+python3 audit_layout.py
 ```
 
-`audit_layout.py` 渲染真实窗口后测量各控件的实际几何，报告用户会感知为"布局坏了"的问题：列宽之和超出可见宽度、控件零尺寸或未映射、自然尺寸超过窗口 minsize、文字溢出标签或按钮。改动 `layout.py` 后跑一次：
+无桌面环境时可使用 Xvfb：
 
 ```bash
-python3 audit_layout.py
-xvfb-run -a python3 audit_layout.py   # 无显示器时
+xvfb-run -a python3 smoke_gui.py
+xvfb-run -a python3 audit_layout.py
 ```
