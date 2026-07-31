@@ -20,6 +20,7 @@ from .paths import (
 )
 from .store import (
     OPENAI_PROXY_COMPAT,
+    Snapshot,
     backfill_proxy_compat,
     hide_builtin,
     is_builtin_provider,
@@ -28,6 +29,7 @@ from .store import (
     load_hidden_builtins,
     load_models_store,
     load_settings,
+    load_snapshot,
     merge_openai_proxy_compat,
     read_json,
     unhide_builtin,
@@ -200,6 +202,7 @@ __all__ = [
     "load_models_store",
     "load_presets",
     "load_settings",
+    "load_snapshot",
     "merge_auth_key",
     "merge_custom_provider",
     "merge_openai_proxy_compat",
@@ -226,6 +229,7 @@ __all__ = [
     "save_presets",
     "set_default_model",
     "settings_path",
+    "Snapshot",
     "supports_chat_probe",
     "switch_backups_dir",
     "switch_to",

@@ -1,6 +1,7 @@
 """Reading and writing the JSON config files, plus the compat backfill."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import json
@@ -166,3 +167,27 @@ def backfill_proxy_compat(data: Any) -> bool:
             prov["compat"] = merged
             changed = True
     return changed
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """一次刷新用到的全部配置，各文件只读一次。
+
+    这里存在的理由是可读性而非速度：原先 refresh_providers 与它调用的
+    _load_provider / _refresh_models 各自重读同一批文件，一次刷新读了八遍。
+    """
+    custom: dict
+    auth: dict
+    store: dict
+    settings: dict
+    hidden: set
+
+
+def load_snapshot() -> Snapshot:
+    return Snapshot(
+        custom=load_custom(),
+        auth=load_auth(),
+        store=load_models_store(),
+        settings=load_settings(),
+        hidden=load_hidden_builtins(),
+    )

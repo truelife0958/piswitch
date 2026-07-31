@@ -231,11 +231,11 @@ class App(tk.Tk):
     def refresh_providers(
         self, select: str | None = None, *, load_selection: bool = True
     ) -> None:
-        store = core.load_models_store()
-        hidden = set() if self.show_hidden.get() else core.load_hidden_builtins()
+        snap = core.load_snapshot()
+        hidden = set() if self.show_hidden.get() else snap.hidden
         records = core.provider_rows(
-            core.load_custom(), core.load_auth(), store,
-            default_provider=core.load_settings().get("defaultProvider"),
+            snap.custom, snap.auth, snap.store,
+            default_provider=snap.settings.get("defaultProvider"),
             health=self._health, hidden=hidden,
         )
         self._provider_records = records
@@ -243,7 +243,7 @@ class App(tk.Tk):
         self._render_provider_rows(select=target)
         if target and self.provider_tree.exists(target):
             if load_selection:
-                self._load_provider(target)
+                self._load_provider(target, snap=snap)
         elif load_selection and not self.provider_tree.get_children():
             if not self.provider_filter_var.get().strip():
                 self._reset_new_provider_form()
@@ -251,7 +251,7 @@ class App(tk.Tk):
             first = self.provider_tree.get_children()[0]
             self.provider_tree.selection_set(first)
             self.provider_tree.focus(first)
-            self._load_provider(first)
+            self._load_provider(first, snap=snap)
         # 列表里也有内置，所以两个数都报，而不是只报自定义的
         custom_count = sum(1 for record in records if record["custom"])
         self.status_var.set(
@@ -269,10 +269,9 @@ class App(tk.Tk):
                 return
             self._load_provider(target)
 
-    def _load_provider(self, provider: str) -> None:
-        custom = core.load_custom()
-        auth = core.load_auth()
-        store = core.load_models_store()
+    def _load_provider(self, provider: str, *, snap: core.Snapshot | None = None) -> None:
+        snap = snap or core.load_snapshot()
+        custom, auth, store = snap.custom, snap.auth, snap.store
         config = custom["providers"].get(provider)
         builtin = core.is_builtin_provider(provider, store)
         if not isinstance(config, dict):
@@ -289,7 +288,7 @@ class App(tk.Tk):
         self._current_has_oauth = (
             kind == "oauth" and isinstance(auth_entry, dict) and bool(auth_entry)
         )
-        self._current_is_hidden = builtin and provider in core.load_hidden_builtins()
+        self._current_is_hidden = builtin and provider in snap.hidden
 
         self._tracking_form = False
         try:
@@ -327,17 +326,17 @@ class App(tk.Tk):
         self.key_visibility_check.configure(state="normal" if key_editable else "disabled")
         self._current_config = config
         self._apply_action_states()
-        self._refresh_models(config)
+        self._refresh_models(config, settings=snap.settings)
         self._mark_form_clean()
 
-    def _refresh_models(self, config: dict) -> None:
+    def _refresh_models(self, config: dict, *, settings: dict | None = None) -> None:
         self.model_tree.delete(*self.model_tree.get_children())
         models = config.get("models", [])
         if not isinstance(models, list):
             self.model_count_var.set("0 个")
             return
         query = self.model_filter_var.get()
-        settings = core.load_settings()
+        settings = settings or core.load_settings()
         default_provider = settings.get("defaultProvider")
         default_model = settings.get("defaultModel")
         visible = 0

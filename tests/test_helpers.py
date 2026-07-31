@@ -384,3 +384,19 @@ def test_provider_rows_counts_non_list_models_as_zero():
     rows = core.provider_rows(custom, {}, {}, default_provider=None,
                               health={}, hidden=set())
     assert rows[0]["values"][2] == 0
+
+
+def test_load_snapshot_reads_each_config_once(monkeypatch):
+    calls: list[str] = []
+    original = core.store.read_json
+
+    def counting(path, default):
+        calls.append(str(path))
+        return original(path, default)
+
+    monkeypatch.setattr(core.store, "read_json", counting)
+    snap = core.load_snapshot()
+    # 四个配置文件各读一次，不多不少
+    assert len(calls) == len(set(calls)) == 4
+    assert isinstance(snap.custom.get("providers"), dict)
+    assert isinstance(snap.hidden, set)
