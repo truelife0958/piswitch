@@ -34,7 +34,19 @@ piswitch 是一个轻量的 pi 模型供应商管理工具，用于维护 `~/.pi
 piswitch
 ```
 
+在 WSL 上，`install.sh` 会额外用 `sudo` 往 `/usr/share/applications` 装一份桌面入口——WSLg 只扫系统目录，放在 `~/.local/share/applications` 的入口不会出现在 Windows 开始菜单。设 `PISWITCH_NO_SYSTEM_ENTRY=1` 可跳过这步和它需要的 sudo。
+
 WSL 环境需要启用 WSLg 或配置可用的 X server。
+
+## 命令行
+
+带参数运行时不启动图形界面，适合图形环境不可用的场合：
+
+```bash
+piswitch list             # 列出预设
+piswitch use <名称>        # 切换到预设
+piswitch model <query>     # 模糊匹配并切换模型，多个候选会列出来
+```
 
 ## 使用
 
