@@ -208,6 +208,7 @@ def test_key_status_reports_missing_env_var_while_typing(app, monkeypatch):
     assert "未设置" in app.key_status_var.get()
     assert "PISWITCH_TEST_KEY" in app.key_status_var.get()
     assert app.key_status_label.cget("style") == "Danger.TLabel"
+    assert app.key_status_label.winfo_manager() == "grid"
 
 
 def test_key_status_reports_set_env_var(app, monkeypatch):
@@ -220,8 +221,10 @@ def test_key_status_reports_set_env_var(app, monkeypatch):
 def test_key_status_is_silent_for_literal_and_empty_keys(app):
     app.api_key_var.set("sk-literal-key")
     assert app.key_status_var.get() == ""
+    assert app.key_status_label.winfo_manager() == ""
     app.api_key_var.set("")
     assert app.key_status_var.get() == ""
+    assert app.key_status_label.winfo_manager() == ""
 
 
 def test_key_status_updates_on_provider_selection(app):

@@ -103,7 +103,7 @@ def apply(root) -> ttk.Style:
     style.configure(
         "TButton",
         width=0,
-        padding=(9, 5),
+        padding=(8, 4),
         background=colors["surface_alt"],
         foreground=colors["text"],
         bordercolor=colors["border"],
@@ -148,7 +148,7 @@ def apply(root) -> ttk.Style:
         foreground=colors["text"],
         bordercolor=colors["border"],
         insertcolor=colors["text"],
-        padding=5,
+        padding=4,
     )
     style.configure(
         "TCombobox",
@@ -156,7 +156,7 @@ def apply(root) -> ttk.Style:
         background=colors["surface"],
         foreground=colors["text"],
         bordercolor=colors["border"],
-        padding=4,
+        padding=3,
     )
     style.configure(
         "Treeview",
@@ -164,7 +164,7 @@ def apply(root) -> ttk.Style:
         fieldbackground=colors["surface"],
         foreground=colors["text"],
         bordercolor=colors["border"],
-        rowheight=27,
+        rowheight=25,
     )
     style.map(
         "Treeview",

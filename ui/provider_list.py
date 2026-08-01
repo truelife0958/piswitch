@@ -208,8 +208,13 @@ class ProviderListMixin:
             "env_missing": "Danger.TLabel",
             "invalid": "Danger.TLabel",
         }
-        self.key_status_var.set(labels.get(state, ""))
+        label = labels.get(state, "")
+        self.key_status_var.set(label)
         self.key_status_label.configure(style=styles.get(state, "Muted.TLabel"))
+        if label:
+            self.key_status_label.grid()
+        else:
+            self.key_status_label.grid_remove()
 
     def toggle_show_hidden(self) -> None:
         # This only changes which rows are visible; the current form remains untouched.

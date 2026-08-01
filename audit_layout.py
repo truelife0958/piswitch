@@ -78,10 +78,19 @@ def walk(widget, depth=0):
         cls = child.winfo_class()
         w, h = child.winfo_width(), child.winfo_height()
         mapped = bool(child.winfo_ismapped())
+        top = child.winfo_toplevel()
+        intentionally_hidden = (
+            child is getattr(top, "key_status_label", None)
+            and not getattr(top, "key_status_var", None).get()
+        )
         # Menus are intentionally unmapped until their Menubutton is opened.
-        if not mapped and cls not in ("Toplevel", "Menu"):
+        if not mapped and cls not in ("Toplevel", "Menu") and not intentionally_hidden:
             flag(f"未映射控件 {cls} ({child})")
-        elif (w <= 1 or h <= 1) and cls not in ("Frame", "TFrame", "Toplevel", "Menu"):
+        elif (
+            (w <= 1 or h <= 1)
+            and cls not in ("Frame", "TFrame", "Toplevel", "Menu")
+            and not intentionally_hidden
+        ):
             flag(f"零尺寸控件 {cls} {w}x{h} ({child})")
         # A button whose natural width exceeds its allotted width shows clipped text.
         if cls in ("TButton", "TLabel") and mapped:
@@ -110,6 +119,10 @@ def main() -> int:
 
     audit_tree("provider_tree", app.provider_tree)
     audit_tree("model_tree", app.model_tree)
+    visible_model_rows = max(0, (app.model_tree.winfo_height() - 26) // 25)
+    print(f"    model rows visible={visible_model_rows}")
+    if visible_model_rows < 6:
+        flag(f"model_tree: 默认窗口仅能完整显示约 {visible_model_rows} 行模型")
 
     print("\n[widget tree]")
     walk(app)

@@ -13,7 +13,7 @@ from ui import theme
 
 
 def _build_toolbar(app) -> ttk.Frame:
-    toolbar = ttk.Frame(app, padding=(10, 8), style="Toolbar.TFrame")
+    toolbar = ttk.Frame(app, padding=(10, 5), style="Toolbar.TFrame")
     toolbar.pack(fill="x")
     ttk.Label(toolbar, text="piswitch", style="Title.TLabel").pack(side="left")
     toolbar_actions = ttk.Frame(toolbar, style="Toolbar.TFrame")
@@ -49,7 +49,7 @@ def _build_toolbar(app) -> ttk.Frame:
 
 def _build_provider_pane(app, parent) -> None:
     provider_filter = ttk.Frame(parent)
-    provider_filter.pack(fill="x", pady=(0, 6))
+    provider_filter.pack(fill="x", pady=(0, 4))
     ttk.Label(provider_filter, text="筛选").pack(side="left")
     ttk.Label(
         provider_filter, textvariable=app.provider_count_var, width=5, anchor="e"
@@ -93,7 +93,7 @@ def _build_provider_pane(app, parent) -> None:
 
 def _setup_provider_actions(app, parent) -> None:
     actions = ttk.Frame(parent)
-    actions.pack(fill="x", pady=(10, 14))
+    actions.pack(fill="x", pady=(4, 7))
     app.save_provider_button = ttk.Button(
         actions,
         text="保存供应商",
@@ -136,9 +136,11 @@ def _build_form(app, parent) -> None:
         ("Base URL", app.base_url_var),
     )
     for row, (label, variable) in enumerate(fields):
-        ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Label(form, text=label).grid(
+            row=row, column=0, sticky="w", padx=(0, 10), pady=2
+        )
         entry = ttk.Entry(form, textvariable=variable)
-        entry.grid(row=row, column=1, columnspan=2, sticky="ew", pady=5)
+        entry.grid(row=row, column=1, columnspan=2, sticky="ew", pady=2)
         if row == 0:
             app.provider_entry = entry
         elif row == 1:
@@ -146,15 +148,19 @@ def _build_form(app, parent) -> None:
         elif row == 2:
             app.base_url_entry = entry
 
-    ttk.Label(form, text="API 类型").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=5)
+    ttk.Label(form, text="API 类型").grid(
+        row=3, column=0, sticky="w", padx=(0, 10), pady=2
+    )
     app.api_combo = ttk.Combobox(
         form, textvariable=app.api_var, values=core.API_TYPES, state="readonly"
     )
-    app.api_combo.grid(row=3, column=1, columnspan=2, sticky="ew", pady=5)
+    app.api_combo.grid(row=3, column=1, columnspan=2, sticky="ew", pady=2)
 
-    ttk.Label(form, text="API Key").grid(row=4, column=0, sticky="w", padx=(0, 10), pady=5)
+    ttk.Label(form, text="API Key").grid(
+        row=4, column=0, sticky="w", padx=(0, 10), pady=2
+    )
     app.api_key_entry = ttk.Entry(form, textvariable=app.api_key_var, show="*")
-    app.api_key_entry.grid(row=4, column=1, sticky="ew", pady=5)
+    app.api_key_entry.grid(row=4, column=1, sticky="ew", pady=2)
     app.key_visibility_check = ttk.Checkbutton(
         form,
         text="显示",
@@ -163,14 +169,14 @@ def _build_form(app, parent) -> None:
     )
     app.key_visibility_check.grid(row=4, column=2, sticky="e", padx=(8, 0))
     app.key_status_label = ttk.Label(form, textvariable=app.key_status_var, anchor="w")
-    app.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 2))
+    app.key_status_label.grid(row=5, column=1, columnspan=2, sticky="w")
 
     _setup_provider_actions(app, parent)
 
 
 def _build_model_header(app, parent) -> None:
     model_header = ttk.Frame(parent)
-    model_header.pack(fill="x", pady=(2, 6))
+    model_header.pack(fill="x", pady=(0, 4))
     ttk.Label(model_header, text="模型", style="Section.TLabel").pack(side="left")
     app.set_default_button = ttk.Button(
         model_header,
@@ -203,7 +209,7 @@ def _build_model_header(app, parent) -> None:
 
 def _build_model_tree(app, parent) -> None:
     model_filter = ttk.Frame(parent)
-    model_filter.pack(fill="x", pady=(0, 6))
+    model_filter.pack(fill="x", pady=(0, 4))
     ttk.Label(model_filter, text="筛选模型").pack(side="left")
     ttk.Label(
         model_filter, textvariable=app.model_count_var, width=5, anchor="e"
@@ -254,15 +260,15 @@ def build(app) -> None:
         app,
         textvariable=app.status_var,
         anchor="w",
-        padding=(8, 5),
+        padding=(8, 3),
         style="Status.TLabel",
     ).pack(side="bottom", fill="x")
 
     pane = ttk.PanedWindow(app, orient="horizontal")
-    pane.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+    pane.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
-    left = ttk.Frame(pane, padding=(0, 4, 8, 4))
-    right = ttk.Frame(pane, padding=(8, 4, 0, 4))
+    left = ttk.Frame(pane, padding=(0, 2, 8, 2))
+    right = ttk.Frame(pane, padding=(8, 2, 0, 2))
     pane.add(left, weight=2)
     pane.add(right, weight=3)
 
