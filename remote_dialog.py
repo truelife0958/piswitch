@@ -194,16 +194,22 @@ def _build_remote_buttons(
     def import_selected() -> None:
         selected_ids = selection.checked_ids()
         if not selected_ids:
-            messagebox.showinfo("导入模型", "请至少选择一个尚未导入的模型。", parent=win)
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, "请至少选择一个尚未导入的模型。", parent=win
+            )
             return
         current_ids = _current_model_ids(provider)
         if current_ids is None:
-            messagebox.showerror("导入失败", f"供应商 {provider} 已不存在", parent=win)
+            messagebox.showerror(
+                theme.WINDOW_TITLE, f"供应商 {provider} 已不存在", parent=win
+            )
             win.destroy()
             return
         selected_ids = [model_id for model_id in selected_ids if model_id not in current_ids]
         if not selected_ids:
-            messagebox.showinfo("导入模型", "所选模型均已导入，无需重复添加。", parent=win)
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, "所选模型均已导入，无需重复添加。", parent=win
+            )
             return
         try:
             store = core.load_models_store()
@@ -224,7 +230,7 @@ def _build_remote_buttons(
                 metadata=metadata,
             )
         except (OSError, ValueError) as exc:
-            messagebox.showerror("导入失败", str(exc), parent=win)
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc), parent=win)
             return
         win.destroy()
         app.refresh_provider_models(provider)
@@ -233,12 +239,16 @@ def _build_remote_buttons(
     def delete_missing() -> None:
         current_ids = _current_model_ids(provider)
         if current_ids is None:
-            messagebox.showerror("删除失败", f"供应商 {provider} 已不存在", parent=win)
+            messagebox.showerror(
+                theme.WINDOW_TITLE, f"供应商 {provider} 已不存在", parent=win
+            )
             win.destroy()
             return
         candidates = [model_id for model_id in missing_ids if model_id in current_ids]
         if not candidates:
-            messagebox.showinfo("删除模型", "这些模型已不在本地配置中。", parent=win)
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, "这些模型已不在本地配置中。", parent=win
+            )
             win.destroy()
             app.refresh_provider_models(provider)
             return
@@ -256,14 +266,14 @@ def _build_remote_buttons(
         if settings.get("defaultProvider") == provider and default_model in candidates:
             prompt += f"\n\n{default_model} 是 pi 当前默认模型，删除后将不可用。"
         prompt += "\n\n确认从本地配置删除？"
-        if not messagebox.askyesno("删除远端未返回模型", prompt, parent=win):
+        if not messagebox.askyesno(theme.WINDOW_TITLE, prompt, parent=win):
             return
         try:
             removed = core.delete_provider_models(
                 provider, candidates, ts=core.mutation_timestamp()
             )
         except OSError as exc:
-            messagebox.showerror("删除失败", str(exc), parent=win)
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc), parent=win)
             return
         win.destroy()
         app.refresh_provider_models(provider)
@@ -327,7 +337,7 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
     display_models = [*models, *missing_rows]
     if not display_models:
         app.status_var.set("连接成功，但接口没有返回模型")
-        messagebox.showinfo("拉取模型", "接口返回了空模型列表。")
+        messagebox.showinfo(theme.WINDOW_TITLE, "接口返回了空模型列表。")
         return
 
     if missing_ids:
@@ -337,7 +347,7 @@ def show_remote_models(app, models: list[dict], provider: str) -> None:
     else:
         app.status_var.set(f"已拉取 {len(models)} 个模型")
     win = tk.Toplevel(app)
-    win.title("同步远端模型")
+    win.title(theme.WINDOW_TITLE)
     win.geometry("700x470")
     win.transient(app)
 

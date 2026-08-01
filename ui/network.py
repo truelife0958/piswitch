@@ -8,6 +8,7 @@ from tkinter import messagebox
 
 import core
 import remote_dialog
+from ui import theme
 
 
 # Batch health checks run concurrently but stay modest: these are third-party gateways,
@@ -49,7 +50,7 @@ class NetworkMixin:
                 self._set_network_busy(False)
                 if error is not None:
                     self.status_var.set("连接失败")
-                    messagebox.showerror("连接失败", str(error))
+                    messagebox.showerror(theme.WINDOW_TITLE, str(error))
                 elif callback is not None:
                     callback()
         except queue.Empty:
@@ -90,12 +91,14 @@ class NetworkMixin:
             if chat_ok is False:
                 self.status_var.set("模型接口可用，但对话失败")
                 messagebox.showwarning(
-                    "对话测试失败",
+                    theme.WINDOW_TITLE,
                     f"模型接口可用，共 {len(models)} 个模型。\n\n{note}",
                 )
                 return
             self.status_var.set(f"连接成功，发现 {len(models)} 个模型")
-            messagebox.showinfo("连接成功", f"共发现 {len(models)} 个模型。\n{note}")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"共发现 {len(models)} 个模型。\n{note}"
+            )
 
         self._run_network("正在测试模型接口与对话...", action, success)
 
@@ -121,7 +124,7 @@ class NetworkMixin:
                 continue
             targets.append((provider, info))
         if not targets:
-            messagebox.showinfo("检查全部", "没有可检查的供应商。")
+            messagebox.showinfo(theme.WINDOW_TITLE, "没有可检查的供应商。")
             return
 
         def action():
@@ -156,11 +159,11 @@ class NetworkMixin:
             lines = "\n".join(f"{r['provider']}：{r['detail']}" for r in failed[:12])
             if len(failed) > 12:
                 lines += f"\n... 共 {len(failed)} 个失败"
-            messagebox.showwarning("部分供应商不可用", lines)
+            messagebox.showwarning(theme.WINDOW_TITLE, lines)
 
     def fetch_models(self) -> None:
         if not self.current_provider:
-            messagebox.showinfo("拉取模型", "请先保存供应商")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先保存供应商")
             return
         provider = self.current_provider
         self._run_network(

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from tkinter import messagebox
 
+from ui import theme
+
 
 class FormGuardMixin:
     """依赖 App 提供的：表单五个 StringVar、provider_tree、current_provider、
@@ -41,7 +43,7 @@ class FormGuardMixin:
         if not self._form_dirty:
             return True
         answer = messagebox.askyesnocancel(
-            "未保存的修改",
+            theme.WINDOW_TITLE,
             "供应商信息尚未保存。\n\n"
             "选择“是”保存后继续，“否”放弃修改，“取消”留在当前页面。",
             parent=self,

@@ -28,7 +28,7 @@ class App(
 ):
     def __init__(self) -> None:
         super().__init__()
-        self.title("piswitch")
+        self.title(theme.WINDOW_TITLE)
         self.geometry("920x600")
         self.minsize(760, 500)
         self._window_icon = None
@@ -120,7 +120,7 @@ def main() -> None:
         )
         print(f"[piswitch] {message}", file=sys.stderr)
         try:
-            messagebox.showerror("piswitch 无法启动", message)
+            messagebox.showerror(theme.WINDOW_TITLE, message)
         except tk.TclError:
             pass
         raise SystemExit(1) from exc

@@ -7,6 +7,7 @@ import core
 import config_dialogs
 import dialogs
 from core import mutation_timestamp
+from ui import theme
 
 
 class ProviderCrudMixin:
@@ -74,10 +75,15 @@ class ProviderCrudMixin:
     def save_provider(self) -> bool:
         provider = self.provider_var.get().strip()
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showerror("保存失败", f"{provider} 是内置供应商，不能覆盖或保存。")
+            messagebox.showerror(
+                theme.WINDOW_TITLE, f"{provider} 是内置供应商，不能覆盖或保存。"
+            )
             return False
         if not self.current_provider and provider in core.load_custom()["providers"]:
-            messagebox.showerror("保存失败", f"Provider ID {provider} 已存在，请从左侧选择后编辑")
+            messagebox.showerror(
+                theme.WINDOW_TITLE,
+                f"Provider ID {provider} 已存在，请从左侧选择后编辑",
+            )
             return False
         original_provider = self.current_provider
         try:
@@ -92,7 +98,7 @@ class ProviderCrudMixin:
                 preserve_auth=self._current_has_oauth,
             )
         except (OSError, ValueError) as exc:
-            messagebox.showerror("保存失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return False
         self.current_provider = provider
         self.refresh_providers(select=provider)
@@ -105,7 +111,7 @@ class ProviderCrudMixin:
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
             messagebox.showinfo(
-                "无法删除",
+                theme.WINDOW_TITLE,
                 f"{provider} 是内置供应商，不能删除。\n"
                 "可用“更多操作”菜单中的“从列表移除”把它隐藏，"
                 "或用“退出登录”移除其凭据。",
@@ -118,12 +124,12 @@ class ProviderCrudMixin:
                 "删除后默认模型将不可用，建议先在 pi 中切换默认模型。\n\n"
                 "仍然删除？"
             )
-        if not messagebox.askyesno("删除供应商", prompt):
+        if not messagebox.askyesno(theme.WINDOW_TITLE, prompt):
             return
         try:
             core.delete_custom_provider(provider, ts=mutation_timestamp())
         except OSError as exc:
-            messagebox.showerror("删除失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         self.current_provider = None
         self.refresh_providers()
@@ -138,7 +144,9 @@ class ProviderCrudMixin:
         auth = core.load_auth()
         entry = auth.get(provider)
         if not isinstance(entry, dict) or not entry:
-            messagebox.showinfo("退出登录", f"{provider} 当前没有存储的凭据")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"{provider} 当前没有存储的凭据"
+            )
             return
         kind = core.auth_kind(provider, auth, core.load_custom())
         noun = "OAuth 凭据" if kind == "oauth" else "API Key"
@@ -147,15 +155,15 @@ class ProviderCrudMixin:
             prompt += (
                 "\n之后需重新走 pi /login 流程来重新登录(由该供应商的扩展负责)。"
             )
-        if not messagebox.askyesno("退出登录", prompt):
+        if not messagebox.askyesno(theme.WINDOW_TITLE, prompt):
             return
         try:
             removed = core.delete_provider_credentials(provider, ts=mutation_timestamp())
         except OSError as exc:
-            messagebox.showerror("退出登录失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         if not removed:
-            messagebox.showinfo("退出登录", "未发生变化")
+            messagebox.showinfo(theme.WINDOW_TITLE, "未发生变化")
             return
         self.refresh_providers(select=provider)
         self.status_var.set(f"已退出登录 {provider}")
@@ -167,7 +175,7 @@ class ProviderCrudMixin:
             return
         store = core.load_models_store()
         if not core.is_builtin_provider(provider, store):
-            messagebox.showinfo("不适用", f"{provider} 不是内置供应商。")
+            messagebox.showinfo(theme.WINDOW_TITLE, f"{provider} 不是内置供应商。")
             return
         hidden = core.load_hidden_builtins()
         if provider in hidden:

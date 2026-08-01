@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import core
+from ui import theme
 
 
 def _build_backup_tree(parent, backups: list) -> ttk.Treeview:
@@ -33,18 +34,22 @@ def _build_backup_buttons(parent, tree, backups, app, win) -> None:
         if not selection or not app.confirm_form_transition():
             return
         backup = backups[int(selection[0])]
-        if not messagebox.askyesno("确认恢复", f"恢复备份 {backup.name}？", parent=win):
+        if not messagebox.askyesno(
+            theme.WINDOW_TITLE, f"恢复备份 {backup.name}？", parent=win
+        ):
             return
         try:
             restored = core.restore_switch_backup(backup, ts=core.mutation_timestamp())
         except (OSError, ValueError) as exc:
-            messagebox.showerror("恢复失败", str(exc), parent=win)
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc), parent=win)
             return
         win.destroy()
         app.current_provider = None
         app.refresh_providers()
         app.status_var.set(f"已恢复 {len(restored)} 个配置文件")
-        messagebox.showinfo("恢复完成", "配置已恢复，恢复前状态也已自动备份。")
+        messagebox.showinfo(
+            theme.WINDOW_TITLE, "配置已恢复，恢复前状态也已自动备份。"
+        )
 
     buttons = ttk.Frame(parent, padding=(10, 0, 10, 10))
     buttons.pack(fill="x")
@@ -115,7 +120,7 @@ def _build_model_buttons(
                 provider, model["id"], changes, ts=core.mutation_timestamp()
             )
         except (OSError, ValueError) as exc:
-            messagebox.showerror("保存失败", str(exc), parent=win)
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc), parent=win)
             return
         win.destroy()
         app.refresh_provider_models(provider)
@@ -132,10 +137,10 @@ def _build_model_buttons(
 def open_backup_restore(app) -> None:
     backups = core.list_switch_backups()
     if not backups:
-        messagebox.showinfo("恢复备份", "目前没有可恢复的备份。")
+        messagebox.showinfo(theme.WINDOW_TITLE, "目前没有可恢复的备份。")
         return
     win = tk.Toplevel(app)
-    win.title("恢复配置备份")
+    win.title(theme.WINDOW_TITLE)
     win.geometry("660x400")
     win.transient(app)
 
@@ -156,7 +161,7 @@ def open_backup_restore(app) -> None:
 
 def open_model_editor(app, provider: str, model: dict) -> tk.Toplevel:
     win = tk.Toplevel(app)
-    win.title(f"编辑模型 {model['id']}")
+    win.title(theme.WINDOW_TITLE)
     win.transient(app)
     body = ttk.Frame(win, padding=(12, 12, 12, 6))
     body.pack(fill="both", expand=True)

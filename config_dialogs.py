@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import core
+from ui import theme
 
 
 def _resolve_import_conflicts(incoming: dict, clashes: list[str]) -> bool | None:
@@ -19,10 +20,10 @@ def _resolve_import_conflicts(incoming: dict, clashes: list[str]) -> bool | None
             + (f"\n... 共 {len(clashes)} 个\n\n" if len(clashes) > 8 else "\n\n")
             + "点“是”覆盖它们，点“否”只导入新的供应商。"
         )
-        answer = messagebox.askyesnocancel("导入配置", prompt)
+        answer = messagebox.askyesnocancel(theme.WINDOW_TITLE, prompt)
         return None if answer is None else bool(answer)
 
-    if not messagebox.askyesno("导入配置", prompt + "继续？"):
+    if not messagebox.askyesno(theme.WINDOW_TITLE, prompt + "继续？"):
         return None
     return False
 
@@ -80,11 +81,11 @@ def export_config(app) -> None:
     """导出不含明文密钥的供应商配置。"""
     payload = core.export_providers()
     if not payload["providers"]:
-        messagebox.showinfo("导出配置", "没有可导出的自定义供应商。")
+        messagebox.showinfo(theme.WINDOW_TITLE, "没有可导出的自定义供应商。")
         return
     path = filedialog.asksaveasfilename(
         parent=app,
-        title="导出供应商配置",
+        title=theme.WINDOW_TITLE,
         defaultextension=".json",
         initialfile=f"piswitch-providers-{datetime.now().strftime('%Y%m%d')}.json",
         filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
@@ -94,12 +95,12 @@ def export_config(app) -> None:
     try:
         core.write_json_atomic(Path(path), payload)
     except OSError as exc:
-        messagebox.showerror("导出失败", str(exc))
+        messagebox.showerror(theme.WINDOW_TITLE, str(exc))
         return
     count = len(payload["providers"])
     app.status_var.set(f"已导出 {count} 个供应商到 {Path(path).name}")
     messagebox.showinfo(
-        "导出完成",
+        theme.WINDOW_TITLE,
         f"已导出 {count} 个供应商。\n\n"
         "文件不含 API Key。$ENV_VAR 形式的引用会保留，\n"
         "导入方需自行设置对应的环境变量。",
@@ -109,7 +110,7 @@ def export_config(app) -> None:
 def import_config(app) -> None:
     path = filedialog.askopenfilename(
         parent=app,
-        title="导入供应商配置",
+        title=theme.WINDOW_TITLE,
         filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
     )
     if not path:
@@ -117,11 +118,11 @@ def import_config(app) -> None:
     try:
         payload = core.read_json(Path(path), None)
     except (OSError, ValueError) as exc:
-        messagebox.showerror("导入失败", str(exc))
+        messagebox.showerror(theme.WINDOW_TITLE, str(exc))
         return
     incoming = payload.get("providers") if isinstance(payload, dict) else None
     if not isinstance(incoming, dict) or not incoming:
-        messagebox.showerror("导入失败", "导入文件不包含任何供应商")
+        messagebox.showerror(theme.WINDOW_TITLE, "导入文件不包含任何供应商")
         return
 
     existing = set(core.load_custom()["providers"])
@@ -136,7 +137,7 @@ def import_config(app) -> None:
             payload, ts=core.mutation_timestamp(), overwrite=overwrite
         )
     except (OSError, ValueError) as exc:
-        messagebox.showerror("导入失败", str(exc))
+        messagebox.showerror(theme.WINDOW_TITLE, str(exc))
         return
 
     app.current_provider = None
@@ -150,7 +151,7 @@ def import_config(app) -> None:
     detail = summary
     if result["invalid"]:
         detail += "\n\n以下条目格式无效，已忽略：\n" + "\n".join(result["invalid"][:8])
-    messagebox.showinfo("导入完成", detail)
+    messagebox.showinfo(theme.WINDOW_TITLE, detail)
 
 
 def choose_template(app) -> None:
@@ -159,7 +160,7 @@ def choose_template(app) -> None:
     templates = core.PROVIDER_TEMPLATES
 
     win = tk.Toplevel(app)
-    win.title("从模板新建供应商")
+    win.title(theme.WINDOW_TITLE)
     win.geometry("640x420")
     win.transient(app)
     ttk.Label(

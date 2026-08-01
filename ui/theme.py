@@ -22,6 +22,8 @@ COLORS = {
     "stripe": "#f8fafb",
 }
 
+WINDOW_TITLE = "piswitch"
+
 UI_FONT_CANDIDATES = (
     "Noto Sans CJK SC",
     "Microsoft YaHei UI",

@@ -5,6 +5,7 @@ from tkinter import messagebox, simpledialog
 
 import core
 import dialogs
+from ui import theme
 from core import mutation_timestamp
 
 
@@ -74,10 +75,12 @@ class ModelOpsMixin:
             (self.model_tree.focus(),) if self.model_tree.focus() else ()
         )
         if not provider or not selection:
-            messagebox.showinfo("编辑模型", "请先选中一个模型")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先选中一个模型")
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("编辑模型", f"{provider} 是内置供应商，不可修改")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"{provider} 是内置供应商，不可修改"
+            )
             return
         model_id = self.model_tree.set(selection[0], "id")
         models = core.load_custom()["providers"].get(provider, {}).get("models", [])
@@ -85,7 +88,7 @@ class ModelOpsMixin:
             (m for m in models if isinstance(m, dict) and m.get("id") == model_id), None
         )
         if model is None:
-            messagebox.showerror("编辑模型", f"模型 {model_id} 已不存在")
+            messagebox.showerror(theme.WINDOW_TITLE, f"模型 {model_id} 已不存在")
             return
         self._open_model_editor(provider, model)
 
@@ -96,15 +99,15 @@ class ModelOpsMixin:
         """Point pi at the selected model. This is what the tool is named after."""
         provider = self.current_provider
         if not provider:
-            messagebox.showinfo("设为默认", "请先选中一个供应商")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先选中一个供应商")
             return
         selection = self.model_tree.selection() or ((self.model_tree.focus(),)
                                                     if self.model_tree.focus() else ())
         if not selection:
-            messagebox.showinfo("设为默认", "请先选中一个模型")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先选中一个模型")
             return
         if len(selection) > 1:
-            messagebox.showinfo("设为默认", "请只选中一个模型")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请只选中一个模型")
             return
         model_id = self.model_tree.set(selection[0], "id")
         if core.is_default_model(provider, model_id):
@@ -113,7 +116,7 @@ class ModelOpsMixin:
         try:
             core.set_default_model(provider, model_id, ts=mutation_timestamp())
         except (OSError, ValueError) as exc:
-            messagebox.showerror("设为默认失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         self.refresh_provider_models(provider)
         self.status_var.set(f"pi 默认模型: {provider}/{model_id}")
@@ -121,12 +124,16 @@ class ModelOpsMixin:
     def add_models(self) -> None:
         provider = self.current_provider
         if not provider:
-            messagebox.showinfo("增加模型", "请先保存供应商")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先保存供应商")
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("增加模型", f"{provider} 是内置供应商，不可修改")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"{provider} 是内置供应商，不可修改"
+            )
             return
-        model_ids = simpledialog.askstring("增加模型", "Model ID（多个用逗号分隔）：", parent=self)
+        model_ids = simpledialog.askstring(
+            theme.WINDOW_TITLE, "Model ID（多个用逗号分隔）：", parent=self
+        )
         if model_ids is None:
             return
         try:
@@ -141,7 +148,7 @@ class ModelOpsMixin:
                 provider, model_ids, ts=mutation_timestamp(), metadata=metadata
             )
         except (OSError, ValueError) as exc:
-            messagebox.showerror("增加失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         self.refresh_provider_models(provider)
         self.status_var.set(f"已更新 {provider} 的模型")
@@ -150,10 +157,12 @@ class ModelOpsMixin:
         provider = self.current_provider
         selection = self.model_tree.selection()
         if not provider or not selection:
-            messagebox.showinfo("删除模型", "请先选中一个模型")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先选中一个模型")
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("删除模型", f"{provider} 是内置供应商，不可修改")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"{provider} 是内置供应商，不可修改"
+            )
             return
         # Column-name access, not positional: the tree gained 默认/上下文 columns and a
         # positional read here would silently return the wrong field.
@@ -173,7 +182,7 @@ class ModelOpsMixin:
                 "\n删除后默认模型将不可用，建议先在 pi 中切换默认模型。\n\n"
                 "仍然删除？"
             )
-        if not messagebox.askyesno("删除模型", prompt):
+        if not messagebox.askyesno(theme.WINDOW_TITLE, prompt):
             return
         try:
             if count == 1:
@@ -181,7 +190,7 @@ class ModelOpsMixin:
             else:
                 core.delete_provider_models(provider, model_ids, ts=mutation_timestamp())
         except OSError as exc:
-            messagebox.showerror("删除失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         self.refresh_provider_models(provider)
         self.status_var.set(f"已删除 {count} 个模型")
@@ -189,10 +198,12 @@ class ModelOpsMixin:
     def clear_models(self) -> None:
         provider = self.current_provider
         if not provider:
-            messagebox.showinfo("清空模型", "请先选中一个供应商")
+            messagebox.showinfo(theme.WINDOW_TITLE, "请先选中一个供应商")
             return
         if core.is_builtin_provider(provider, core.load_models_store()):
-            messagebox.showinfo("清空模型", f"{provider} 是内置供应商，不可清空")
+            messagebox.showinfo(
+                theme.WINDOW_TITLE, f"{provider} 是内置供应商，不可清空"
+            )
             return
         current = core.load_custom().get("providers", {}).get(provider, {}).get("models", [])
         n = len(current) if isinstance(current, list) else 0
@@ -212,12 +223,12 @@ class ModelOpsMixin:
             )
         else:
             prompt += "\n\n此操作不可撤销。仍然清空？"
-        if not messagebox.askyesno("清空模型", prompt):
+        if not messagebox.askyesno(theme.WINDOW_TITLE, prompt):
             return
         try:
             removed = core.clear_provider_models(provider, ts=mutation_timestamp())
         except OSError as exc:
-            messagebox.showerror("清空失败", str(exc))
+            messagebox.showerror(theme.WINDOW_TITLE, str(exc))
             return
         self.refresh_provider_models(provider)
         self.status_var.set(f"已清空 {removed} 个模型")
